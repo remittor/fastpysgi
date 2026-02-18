@@ -10,16 +10,43 @@ typedef struct {
     Py_ssize_t exports;
 } bytesio;
 
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 8 && PY_MINOR_VERSION <= 15
+
 bytesio_t * get_bytesio_object(PyObject * io_BytesIO)
 {
-    if (PY_MAJOR_VERSION != 3)
-        return NULL;
-    if (PY_MINOR_VERSION >= 8 && PY_MINOR_VERSION <= 11)
-        return (bytesio_t *)io_BytesIO;
-    return NULL;
+    return (bytesio_t *)io_BytesIO;
 }
 
+#ifdef Py_GIL_DISABLED
+#if Py_GIL_DISABLED == 0
+#undef Py_GIL_DISABLED
+#endif
+#endif
+
+#if !defined(_Py_atomic_load_ulong) && PY_MINOR_VERSION >= 13
+#define Py_CPYTHON_ATOMIC_H
+#include <cpython/pyatomic.h>
+#endif
+
+#ifdef FT_ATOMIC_LOAD_SSIZE_RELAXED
+#undef FT_ATOMIC_LOAD_SSIZE_RELAXED
+#endif
+
+#if defined(Py_GIL_DISABLED) && PY_MINOR_VERSION >= 14
+#define FT_ATOMIC_LOAD_SSIZE_RELAXED(value) _Py_atomic_load_ssize_relaxed(&value)
+#else
+#define FT_ATOMIC_LOAD_SSIZE_RELAXED(value) value
+#endif
+
+#if PY_MINOR_VERSION >= 14
+#ifdef Py_GIL_DISABLED
+#define SHARED_BUF(self) (!PyUnstable_Object_IsUniquelyReferenced((self)->buf))
+#else
+#define SHARED_BUF(self) (Py_REFCNT((self)->buf) != 1)
+#endif // Py_GIL_DISABLED
+#else
 #define SHARED_BUF(self) (Py_REFCNT((self)->buf) > 1)
+#endif
 
 static
 int check_closed(bytesio * self)
@@ -34,7 +61,7 @@ int check_closed(bytesio * self)
 static
 int check_exports(bytesio * self)
 {
-    if (self->exports > 0) {
+    if (FT_ATOMIC_LOAD_SSIZE_RELAXED(self->exports) > 0) {
         PyErr_SetString(PyExc_BufferError, "Existing exports of data: object cannot be re-sized");
         return 1;
     }
@@ -47,7 +74,7 @@ int unshare_buffer(bytesio * self, size_t size)
     PyObject * new_buf;
     if (!SHARED_BUF(self))
         return -1;
-    if (self->exports != 0)
+    if (FT_ATOMIC_LOAD_SSIZE_RELAXED(self->exports) != 0)
         return -1;
     if (size < (size_t)self->string_size)
         return -1;
@@ -172,5 +199,23 @@ PyObject * _io_BytesIO_write(bytesio * self, PyObject * b)
 
     PyBuffer_Release(&buf);
     return n >= 0 ? PyLong_FromSsize_t(n) : NULL;
-} 
+}
 
+#else
+
+bytesio_t * get_bytesio_object(PyObject * io_BytesIO)
+{
+    return NULL;
+}
+
+Py_ssize_t io_BytesIO_write_bytes(bytesio_t * self, const char * bytes, Py_ssize_t len)
+{
+    return 0;
+}
+
+PyObject * _io_BytesIO_write(bytesio * self, PyObject * b)
+{
+    return NULL;
+}
+    
+#endif  // PY_MAJOR_VERSION && PY_MINOR_VERSION
