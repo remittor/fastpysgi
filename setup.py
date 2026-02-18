@@ -12,7 +12,7 @@ import setup_libuv
 SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
 
 module = Extension(
-    "_fastwsgi",
+    "_fastpysgi",
     sources=SOURCES,
     include_dirs=["llhttp/include", "libuv/include"],
 )
@@ -98,11 +98,11 @@ with open("README.md", "r", encoding="utf-8") as read_me:
     long_description = read_me.read()
 
 setup(
-    name="fastwsgi",
+    name="fastpysgi",
     version="0.0.9",
     license="MIT",
     author="James Roberts",
-    py_modules=["fastwsgi"],
+    py_modules=["fastpysgi"],
     ext_modules=[module],
     author_email="jamesroberts.dev@gmail.com",
     description="An ultra fast WSGI server for Python 3",
@@ -125,7 +125,7 @@ setup(
     cmdclass={"build_ext": build_all},
     entry_points={
         "console_scripts": [
-            "fastwsgi = fastwsgi:run_from_cli",
+            "fastpysgi = fastpysgi:run_from_cli",
         ],
     },
 )

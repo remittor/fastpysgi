@@ -8,7 +8,7 @@ def _invalid_status(environ, start_response):
     return [b"OK"]
 
 def _valid_headers(environ, start_response):
-    headers = [("Content-Type", "text/plain"), ("Server", "FastWSGI")]
+    headers = [("Content-Type", "text/plain"), ("Server", "FastPySGI")]
     start_response("200 OK", headers)
     return [b"OK"]
 

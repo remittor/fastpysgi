@@ -388,11 +388,11 @@ int on_header_value_complete(llhttp_t * parser)
             client->error = 1;
             LOGc("%s: Header \"Transfer-Encoding\" contain unsupported value = '%s'", __func__, val);
             // https://peps.python.org/pep-3333/#other-http-features
-            LOGc("%s: FastWSGI cannot decompress content!", __func__);
+            LOGc("%s: FastPySGI cannot decompress content!", __func__);
             return -1;  // critical error
         }
         key = NULL;  // skip chunked flag
-        // Let's skip the chunks flag, since the FastWSGI server completely downloads the body into memory
+        // Let's skip the chunks flag, since the FastPySGI server completely downloads the body into memory
         // and immediately gives body to the WSGI application.
     }
     else if (hname == HN_EXPECT) {
@@ -560,7 +560,7 @@ int on_message_complete(llhttp_t * parser)
     if (client->request.chunked && client->request.http_content_length < 0) {
         sprintf(buf, "%lld", (long long)client->request.wsgi_input_size);
         set_header(client, g_cv.CONTENT_LENGTH, buf, -1, 0);
-        // Insertion of this header is allowed because the header "Transfer-Encoding" FastWSGI server removes!
+        // Insertion of this header is allowed because the header "Transfer-Encoding" FastPySGI server removes!
         // https://peps.python.org/pep-3333/#other-http-features
     }
 

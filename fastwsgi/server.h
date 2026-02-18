@@ -30,7 +30,7 @@ typedef struct {
 
 typedef struct {
     uv_tcp_t server;  // Placement strictly at the beginning of the structure!
-    PyObject * pysrv; // object fastwsgi.py@_Server
+    PyObject * pysrv; // object fastpysgi.py@_Server
     uv_loop_t* loop;
     int num_loop_cb;   // the number of callbacks that were called in one loop cycle
     int num_writes;    // the number of write operations

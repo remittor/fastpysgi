@@ -2,7 +2,7 @@ import os
 import sys
 import time
 import pytest
-import fastwsgi
+import fastpysgi
 from enum import Enum
 
 from contextlib import contextmanager
@@ -23,7 +23,7 @@ PORT = 5000
 
 class ServerProcess:
     def __init__(self, application, host=HOST, port=PORT) -> None:
-        self.process = Process(target=fastwsgi.run, args=(application, host, port))
+        self.process = Process(target=fastpysgi.run, args=(application, host, port))
         self.endpoint = f"http://{host}:{port}"
         self.host = host
         self.port = port

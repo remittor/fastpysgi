@@ -3,10 +3,10 @@ import sys
 import signal
 import importlib
 import click
-import _fastwsgi
+import _fastpysgi
 from pkg_resources import get_distribution
 
-__version__ = get_distribution("fastwsgi").version
+__version__ = get_distribution("fastpysgi").version
 
 LL_DISABLED    = 0
 LL_FATAL_ERROR = 1
@@ -28,7 +28,7 @@ class _Server():
         self.hook_sigint = 2            # 0 = ignore Ctrl-C; 1 = stop server on Ctrl-C; 2 = halt process on Ctrl-C
         self.allow_keepalive = True
         self.add_header_date = True
-        self.add_header_server = "FastWSGI/{}".format(__version__)
+        self.add_header_server = "FastPySGI/{}".format(__version__)
         self.max_content_length = None  # def value: 999999999
         self.max_chunk_size = None      # def value: 256 KiB
         self.read_buffer_size = None    # def value: 64 KiB
@@ -48,25 +48,25 @@ class _Server():
         self.num_workers = workers if workers is not None else self.num_workers
         if self.num_workers > 1:
             return 0
-        return _fastwsgi.init_server(self)
+        return _fastpysgi.init_server(self)
 
     def set_allow_keepalive(self, value):
         self.allow_keepalive = value
-        _fastwsgi.change_setting(self, "allow_keepalive")
+        _fastpysgi.change_setting(self, "allow_keepalive")
 
     def run(self):
         if self.nowait:
             if self.num_workers > 1:
                 raise Exception('Incorrect server options')
-            return _fastwsgi.run_nowait(self)
+            return _fastpysgi.run_nowait(self)
         if self.num_workers > 1:
             return self.multi_run()
-        ret = _fastwsgi.run_server(self)
+        ret = _fastpysgi.run_server(self)
         self.close()
         return ret
         
     def close(self):
-        return _fastwsgi.close_server(self)
+        return _fastpysgi.close_server(self)
 
     def multi_run(self, num_workers = None):
         if num_workers is not None:
@@ -78,8 +78,8 @@ class _Server():
                 print(f"Worker process added with PID: {pid}")
                 continue
             try:
-                _fastwsgi.init_server(self)
-                _fastwsgi.run_server(self)
+                _fastpysgi.init_server(self)
+                _fastpysgi.run_server(self)
             except KeyboardInterrupt:
                 pass
             sys.exit(0)
@@ -121,7 +121,7 @@ def import_from_string(import_str):
 # -------------------------------------------------------------------------------------
 
 @click.command()
-@click.version_option(version=get_distribution("fastwsgi").version, message="%(version)s")
+@click.version_option(version=get_distribution("fastpysgi").version, message="%(version)s")
 @click.option("--host", help="Host the socket is bound to.", type=str, default=server.host, show_default=True)
 @click.option("-p", "--port", help="Port the socket is bound to.", type=int, default=server.port, show_default=True)
 @click.option("-l", "--loglevel", help="Logging level.", type=int, default=server.loglevel, show_default=True)
@@ -132,7 +132,7 @@ def import_from_string(import_str):
 )
 def run_from_cli(host, port, wsgi_app_import_string, loglevel):
     """
-    Run FastWSGI server from CLI
+    Run FastPySGI server from CLI
     """
     try:
         wsgi_app = import_from_string(wsgi_app_import_string)
@@ -141,7 +141,7 @@ def run_from_cli(host, port, wsgi_app_import_string, loglevel):
         sys.exit(1)
 
     server.init(wsgi_app, host, port, loglevel)
-    print(f"FastWSGI server listening at http://{server.host}:{server.port}")
+    print(f"FastPySGI server listening at http://{server.host}:{server.port}")
     server.run()
 
 # -------------------------------------------------------------------------------------
@@ -153,8 +153,8 @@ def run(app = None, host = None, port = None, loglevel = None, workers = None, w
         app = wsgi_app
     if app is None:
         raise Exception("app not specify.")
-    print("FastWSGI server running on PID:", os.getpid())
+    print("FastPySGI server running on PID:", os.getpid())
     server.init(app, host, port, loglevel, workers)
     addon = " multiple workers" if server.num_workers > 1 else ""
-    print(f"FastWSGI server{addon} listening at http://{server.host}:{server.port}")
+    print(f"FastPySGI server{addon} listening at http://{server.host}:{server.port}")
     server.run()

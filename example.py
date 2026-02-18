@@ -1,4 +1,4 @@
-import fastwsgi
+import fastpysgi
 from flask import Flask
 
 app = Flask(__name__)
@@ -10,4 +10,4 @@ def hello_world():
 
 
 if __name__ == "__main__":
-    fastwsgi.run(wsgi_app=app, host="0.0.0.0", port=5000)
+    fastpysgi.run(wsgi_app=app, host="0.0.0.0", port=5000)

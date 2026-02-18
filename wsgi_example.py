@@ -1,4 +1,4 @@
-import fastwsgi
+import fastpysgi
 
 def app(environ, start_response):
     headers = [('Content-Type', 'text/plain')]
@@ -6,4 +6,4 @@ def app(environ, start_response):
     return [b'Hello, World!']
 
 if __name__ == '__main__':
-    fastwsgi.run(wsgi_app=app, host='0.0.0.0', port=5000)
+    fastpysgi.run(wsgi_app=app, host='0.0.0.0', port=5000)

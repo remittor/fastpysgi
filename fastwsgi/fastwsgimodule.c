@@ -1,7 +1,7 @@
 #include <Python.h>
 #include "server.h"
 
-static PyMethodDef FastWsgiFunctions[] = {
+static PyMethodDef FastPySgiFunctions[] = {
     { "init_server", init_server, METH_O, "" },
     { "change_setting", change_setting, METH_VARARGS, "" },
     { "run_server", run_server, METH_O, "" },
@@ -12,13 +12,13 @@ static PyMethodDef FastWsgiFunctions[] = {
 
 static struct PyModuleDef module = {
     PyModuleDef_HEAD_INIT,
-    "fastwsgi",
-    "fastwsgi Python module",
+    "fastpysgi",
+    "fastpysgi Python module",
     -1,
-    FastWsgiFunctions,
+    FastPySgiFunctions,
 };
 
-PyMODINIT_FUNC PyInit__fastwsgi(void)
+PyMODINIT_FUNC PyInit__fastpysgi(void)
 {
     return PyModule_Create(&module);
 }

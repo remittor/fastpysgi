@@ -23,7 +23,7 @@ jobs:
         run: |
           sudo apt-get install -yq libuv1-dev python3-dev
           pip install pytest requests Flask
-      - name: Install FastWSGI Extension
+      - name: Install FastPySGI Extension
         run: python setup.py install
-      - name: Test FastWSGI Python module import
-        run: python -c "import fastwsgi"
+      - name: Test FastPySGI Python module import
+        run: python -c "import fastpysgi"
