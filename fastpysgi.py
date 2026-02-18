@@ -1,12 +1,10 @@
 import os
 import sys
 import signal
-import importlib.util
-import importlib.metadata
 import click
 import _fastpysgi
 
-__version__ = importlib.metadata.version("fastpysgi")
+__version__ = '0.0.9'
 
 LL_DISABLED    = 0
 LL_FATAL_ERROR = 1
@@ -97,6 +95,8 @@ server = _Server()
 # -------------------------------------------------------------------------------------
 
 def import_from_string(import_str):
+    import importlib
+    import importlib.util
     module_str, _, attrs_str = import_str.partition(":")
     if not module_str or not attrs_str:
         raise ImportError("Import string should be in the format <module>:<attribute>")

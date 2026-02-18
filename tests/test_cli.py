@@ -1,7 +1,7 @@
 from click.testing import CliRunner
-import importlib.metadata
 
 from fastpysgi import run_from_cli
+from fastpysgi import __version__ as fastpysgi_version
 
 
 def call_fastwsgi(fnc=None, parameters=None, arguments=None, envs=None):
@@ -23,7 +23,7 @@ class TestCLI:
     def test_version(self):
         result = call_fastwsgi(parameters=["--version"])
         assert result.exit_code == 0
-        assert result.output.strip() == importlib.metadata.version("fastpysgi")
+        assert result.output.strip() == fastpysgi_version
 
     def test_run_from_cli_invalid_module(self):
         result = call_fastwsgi(arguments=["module:wrong"])

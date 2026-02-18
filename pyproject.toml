@@ -1,0 +1,45 @@
+[build-system]
+requires = [ "setuptools>=68", "wheel" ]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = [ "fastpysgi" ]
+
+[project]
+name = "fastpysgi"
+dynamic = [ "version" ]
+description = "An ultra fast WSGI/ASGI server for Python"
+readme = "README.md"
+license = { file = "LICENSE" }
+
+authors = [
+    { name = "James Roberts" },
+    { name = "remittor" },
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
+]
+
+requires-python = ">=3.8"
+
+dependencies = [
+    "click>=7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+fastpysgi = "fastpysgi:run_from_cli"
+
+[project.urls]
+Homepage = "https://github.com/remittor/fastpysgi"
+Issues = "https://github.com/remittor/fastpysgi/issues"
+Repository = "https://github.com/remittor/fastpysgi"
+Donate = "https://github.com/remittor/donate"

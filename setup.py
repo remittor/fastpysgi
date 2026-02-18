@@ -17,6 +17,14 @@ module = Extension(
     include_dirs=["llhttp/include", "libuv/include"],
 )
 
+def get_version():
+    with open("fastpysgi.py", "r", encoding = "utf-8") as file:
+        content = file.read()
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', content, re.M)
+    if match:
+        return match.group(1)
+    raise RuntimeError("Cannot find __version__ in fastpysgi.py")
+
 def get_compiler_version(exe_name):
     version = None
     ver_major = None
@@ -94,38 +102,8 @@ class build_all(build_ext):
         build_ext.build_extensions(self)
 
 
-with open("README.md", "r", encoding="utf-8") as read_me:
-    long_description = read_me.read()
-
 setup(
-    name="fastpysgi",
-    version="0.0.9",
-    license="MIT",
-    author="remittor",
-    py_modules=["fastpysgi"],
-    ext_modules=[module],
-    author_email="remittor@gmail.com",
-    description="An ultra fast WSGI/ASGI server for Python",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/remittor/fastpysgi",
-    project_urls={
-        "Bug Tracker": "https://github.com/remittor/fastpysgi/issues",
-        "Source": "https://github.com/remittor/fastpysgi",
-    },
-    classifiers=[
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-        "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
-        "Programming Language :: Python :: 3",
-        "Development Status :: 3 - Alpha",
-    ],
-    python_requires=">=3.8",
-    install_requires=["click>=7.0"],
-    cmdclass={"build_ext": build_all},
-    entry_points={
-        "console_scripts": [
-            "fastpysgi = fastpysgi:run_from_cli",
-        ],
-    },
+    version = get_version(),
+    ext_modules = [ module ],
+    cmdclass = { "build_ext": build_all },
 )
