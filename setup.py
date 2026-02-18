@@ -120,7 +120,7 @@ setup(
         "Programming Language :: Python :: 3",
         "Development Status :: 3 - Alpha",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     install_requires=["click>=7.0"],
     cmdclass={"build_ext": build_all},
     entry_points={
