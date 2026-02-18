@@ -1,6 +1,9 @@
 #include "common.h"
 #include "llhttp.h"
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 void logrepr(int level, PyObject* obj)
 {
@@ -72,17 +75,25 @@ const char * get_obj_attr_str(PyObject * obj, const char * name)
 static const char weekDays[7][4] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 static const char monthList[12][4] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
-time_t g_actual_time = 0;
+uint32_t g_actual_time = 0;
 char g_actual_asctime[32] = { 0 };
 int g_actual_asctime_len = 0;
 
 int get_asctime(char ** asc_time)
 {
-    time_t curr_time = time(NULL);
-    if (curr_time == g_actual_time) {
+    uint32_t curr_ticks;
+#ifdef _WIN32
+    curr_ticks = GetTickCount() / 1000;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    curr_ticks = (uint32_t)ts.tv_sec;
+#endif
+    if (curr_ticks == g_actual_time && g_actual_asctime_len) {
         *asc_time = g_actual_asctime;
         return g_actual_asctime_len;
     }
+    time_t curr_time = time(NULL);
     struct tm tv;
 #ifdef _WIN32
     gmtime_s(&tv, &curr_time);
@@ -94,7 +105,7 @@ int get_asctime(char ** asc_time)
         weekDays[tv.tm_wday], tv.tm_mday, monthList[tv.tm_mon],
         1900 + tv.tm_year, tv.tm_hour, tv.tm_min, tv.tm_sec);
     if (len > 0 && len < 32) {
-        g_actual_time = curr_time;
+        g_actual_time = curr_ticks;
         g_actual_asctime_len = len;
         memcpy(g_actual_asctime, buf, 32);
         *asc_time = g_actual_asctime;
