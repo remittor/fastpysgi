@@ -33,15 +33,21 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            cibw_arch: "auto"
+            cibw_arch: x86
+          - os: windows-latest
+            cibw_arch: AMD64
           - os: windows-11-arm
-            cibw_arch: "ARM64"
-          - os: macos-latest
-            cibw_arch: "x86_64 arm64"
+            cibw_arch: ARM64
           - os: ubuntu-latest
-            cibw_arch: "x86_64 i686"
+            cibw_arch: i686
+          - os: ubuntu-latest
+            cibw_arch: x86_64
           - os: ubuntu-24.04-arm
             cibw_arch: aarch64
+          - os: macos-latest
+            cibw_arch: x86_64
+          - os: macos-latest
+            cibw_arch: arm64
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v5
@@ -69,7 +75,7 @@ jobs:
       - name: Upload as build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels__${{ matrix.os }}__${{ matrix.cibw_arch }}
           path: dist/*.whl
 
   build-sdist-and-upload:
@@ -105,7 +111,7 @@ jobs:
       - name: Download wheels from build artifacts
         uses: actions/download-artifact@v5
         with:
-          pattern: wheels-*
+          pattern: wheels__*
           merge-multiple: true
           path: dist-wheels/
 
