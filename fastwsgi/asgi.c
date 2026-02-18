@@ -594,7 +594,7 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
     hr = -4570901;
 fin:
     if (hr) {
-        LOGe("%s: FIN WITH error = %d", hr);
+        LOGe("%s: FIN WITH error = %d", __func__, hr);
         PyObject * error = PyErr_Format(PyExc_RuntimeError, "%s: error = %d", __func__, hr);
         return error;
     }
