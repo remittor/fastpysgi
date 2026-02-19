@@ -4,7 +4,7 @@ import signal
 import click
 import _fastpysgi
 
-__version__ = '0.0.9'
+__version__ = '0.1'
 
 LL_DISABLED    = 0
 LL_FATAL_ERROR = 1
