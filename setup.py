@@ -7,7 +7,12 @@ import re
 from setuptools import setup
 from distutils.core import Extension
 from distutils.command.build_ext import build_ext
-import setup_libuv
+import importlib.util
+
+setup_libuv_py = os.path.join(os.path.dirname(__file__), "setup_libuv.py")
+spec = importlib.util.spec_from_file_location("setup_libuv", setup_libuv_py)
+setup_libuv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(setup_libuv)
 
 SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
 
@@ -18,7 +23,8 @@ module = Extension(
 )
 
 def get_version():
-    with open("fastpysgi.py", "r", encoding = "utf-8") as file:
+    main_py = os.path.join(os.path.dirname(__file__), "fastpysgi.py")
+    with open(main_py, "r", encoding = "utf-8") as file:
         content = file.read()
     match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', content, re.M)
     if match:
