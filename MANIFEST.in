@@ -1,14 +1,14 @@
-include llhttp/include/*.h
-include llhttp/src/*.c
-include llhttp/src/*.h
-include libuv/include/*.h
-include libuv/include/*/*.h
-include libuv/src/*.c
-include libuv/src/*.h
-include libuv/src/*/*.c
-include libuv/src/*/*.h
-include fastwsgi/*.c
-include fastwsgi/*.h
 include LICENSE
 include README.md
+
+recursive-include llhttp *.c *.h LICENSE*
+recursive-include libuv  *.c *.h LICENSE*
+
+recursive-include fastwsgi *.c *.h
+
 include setup_libuv.py
+
+global-exclude *.pyc
+global-exclude __pycache__/*
+global-exclude *.o
+global-exclude *.a
