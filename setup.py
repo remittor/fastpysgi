@@ -92,6 +92,7 @@ class build_all(build_ext):
             if c_ver_major:
                 compiler_ver_major = c_ver_major
 
+        so_file = None
         for ext in self.extensions:
             if ext == module:
                 if compiler_type == 'msvc':
@@ -110,8 +111,13 @@ class build_all(build_ext):
                     if compiler.startswith("gcc") and sys.platform.startswith("linux"):
                         ext.extra_link_args += [ "-Wl,--gc-sections" ]
                         ext.extra_link_args += [ "-Wl,-O1" ]
+                    so_file = self.get_ext_fullpath(ext.name)
         
         build_ext.build_extensions(self)
+
+        if so_file and sys.platform.startswith("linux"):
+            print(f"Stripping {so_file}")
+            subprocess.run( [ "strip", "--strip-unneeded", so_file ], check = True )
 
 
 setup(
