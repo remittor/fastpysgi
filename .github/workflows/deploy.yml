@@ -36,6 +36,9 @@ on:
         required: false
         default: ''
         type: string
+  push:
+    tags: 
+      - v[0-9]*
 
 permissions: { }
 
@@ -49,14 +52,24 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
+      valid_tag: ${{ steps.flags.outputs.VALID_TAG }}
       deploy_pypi: ${{ steps.flags.outputs.DEPLOY_PYPI }}
       tag_suffix: ${{ steps.flags.outputs.TAG_SUFFIX }}
     steps:
       - id: flags
         run: |
+          VALID_TAG=false
           DEPLOY_PYPI=false
           TAG_SUFFIX=""
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Tag version: $VERSION"
+          if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+              VALID_TAG=true
+          fi
           if [[ "${{ github.event_name }}" == "release" && "${{ github.event.action }}" == "published" ]]; then
+              DEPLOY_PYPI=true
+          fi
+          if [[ "${{ github.event_name }}" == "push" && "$VALID_TAG" == "true" ]]; then
               DEPLOY_PYPI=true
           fi
           if [[ "$IS_DISPATCH" == "true" ]]; then
@@ -68,6 +81,8 @@ jobs:
                   TAG_SUFFIX="-test"
               fi
           fi
+          echo "VALID_TAG = $VALID_TAG"
+          echo "VALID_TAG=$VALID_TAG" >> $GITHUB_OUTPUT
           echo "DEPLOY_PYPI = $DEPLOY_PYPI"
           echo "DEPLOY_PYPI=$DEPLOY_PYPI" >> $GITHUB_OUTPUT
           echo "TAG_SUFFIX = $TAG_SUFFIX"
@@ -201,7 +216,7 @@ jobs:
         if: ${{ needs.prepare.outputs.deploy_pypi == 'true' && github.event_name == 'release' }}
         run: |
           echo "GITHUB_REF_NAME = $GITHUB_REF_NAME"
-          TAG="${GITHUB_REF_NAME#refs/tags/v}"
+          TAG="${GITHUB_REF_NAME#v}"
           echo "Tag version: $TAG"
           echo "Wheel version: $WHL_VER"
           if [[ "$TAG" != "$WHL_VER" ]]; then
