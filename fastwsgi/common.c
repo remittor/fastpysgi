@@ -64,12 +64,15 @@ fin:
 
 const char * get_obj_attr_str(PyObject * obj, const char * name)
 {
+    const char * res;
     PyObject * attr = PyObject_GetAttrString(obj, name);
-    Py_XDECREF(attr);
     if (!attr || !PyUnicode_CheckExact(attr)) {
+        Py_XDECREF(attr);
         return NULL;
     }
-    return PyUnicode_AsUTF8(attr);
+    res = PyUnicode_AsUTF8(attr);
+    Py_XDECREF(attr);
+    return res;
 }
 
 static const char weekDays[7][4] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
