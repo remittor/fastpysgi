@@ -46,6 +46,7 @@ env:
   IS_PUBLISHED_RELEASE: ${{ github.event_name == 'release' && github.event.action == 'published' }}
   IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
   TEST_BUILD: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test_build == 'true' }}
+  PKG_NAME: fastpysgi
   FORCE_COLOR: 1
 
 jobs:
@@ -150,6 +151,8 @@ jobs:
       id-token: write
     strategy:
       max-parallel: 1
+    outputs:
+      PYPI_PKG_EXISTS: ${{ steps.check_pypi.outputs.PYPI_PKG_EXISTS || 'false' }}
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v5
@@ -190,7 +193,7 @@ jobs:
 
       - name: Prepare env
         run: |
-          WHL_FILE=$( ls dist-wheels/fastpysgi-*.whl | head -n 1 )
+          WHL_FILE=$( ls dist-wheels/$PKG_NAME-*.whl | head -n 1 )
           echo "Wheel: $WHL_FILE"
           WHL_BASE=$( basename "$WHL_FILE" )
           WHL_VER=$( echo "$WHL_BASE" | cut -d'-' -f2 )
@@ -210,7 +213,14 @@ jobs:
           name: FastPySGI v${{ env.WHL_VER }}
           body: |
             FastPySGI v${{ env.WHL_VER }}
-          files: dist-wheels/fastpysgi-*.whl
+          files: dist-wheels/${{ env.PKG_NAME }}-*.whl
+
+      - name: Collect distributions
+        run: |
+          mkdir publish
+          cp dist/* publish/
+          cp dist-wheels/* publish/
+          ls -lah publish
 
       - name: Verify version matches git tag (only PyPI release)
         if: ${{ needs.prepare.outputs.deploy_pypi == 'true' && github.event_name == 'release' }}
@@ -224,43 +234,54 @@ jobs:
               exit 1
           fi
 
-      - name: Check version not already on PyPI
+      - name: Check if project exists on PyPI
+        id: check_pypi
         if: ${{ needs.prepare.outputs.deploy_pypi == 'true' }}
         run: |
-          set -e
-          PYPI_URL="https://pypi.org/pypi/fastpysgi/${WHL_VER}/json"
+          echo "Checking PyPI project exists..."
+          RESP=$( curl -s -I https://pypi.org/pypi/${PKG_NAME}/json )
+          STATUS=$( echo "$RESP" | head -n 1 | awk '{print $2}' )
+          TXTLEN=$( echo "$RESP" | awk -F': ' 'BEGIN{IGNORECASE=1} $1=="Content-Length"{print $2}' | tr -d '\r' )
+          echo "PyPI status code: $STATUS"
+          echo "PyPI json size: $TXTLEN bytes"
+          if [[ "$STATUS" == "200" ]]; then
+              echo "PYPI_PKG_EXISTS=true" >> $GITHUB_OUTPUT
+          elif [[ "$STATUS" == "404" ]]; then
+              echo "PYPI_PKG_EXISTS=false" >> $GITHUB_OUTPUT
+          else
+              echo "ERROR: Unexpected HTTP status $STATUS while checking PyPI"
+              exit 1
+          fi
+
+      - name: Check version not already on PyPI
+        id: check_pypi_ver 
+        if: ${{ needs.prepare.outputs.deploy_pypi == 'true' && steps.check_pypi.outputs.PYPI_PKG_EXISTS == 'true' }}
+        run: |
           echo "Checking PyPI for version ${WHL_VER}..."
-          STATUS=$( curl -s -o /dev/null -w "%{http_code}" "$PYPI_URL" )
+          RESP=$( curl -s -I https://pypi.org/pypi/${PKG_NAME}/${WHL_VER}/json )
+          STATUS=$( echo "$RESP" | head -n 1 | awk '{print $2}' )
+          TXTLEN=$( echo "$RESP" | awk -F': ' 'BEGIN{IGNORECASE=1} $1=="Content-Length"{print $2}' | tr -d '\r' )
           if [[ "$STATUS" == "200" ]]; then
               echo "ERROR: Version ${WHL_VER} already exists on PyPI!"
               exit 1
           elif [[ "$STATUS" == "404" ]]; then
               echo "Version ${WHL_VER} is new — OK to publish."
           else
-              echo "Unexpected HTTP status $STATUS while checking PyPI"
+              echo "ERROR: Unexpected HTTP status $STATUS while checking PyPI"
               exit 1
           fi
 
-      - name: Collect distributions
-        run: |
-          mkdir publish
-          cp dist/* publish/
-          cp dist-wheels/* publish/
-          ls -lah publish
-    
-      - name: Publish wheels to PyPI
-        id: publish_whl
-        if: ${{ needs.prepare.outputs.deploy_pypi == 'true' }}
-        continue-on-error: true
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-
-      - name: First upload using API token
-        if: ${{ needs.prepare.outputs.deploy_pypi && steps.publish_whl.outcome == 'failure' }}
+      - name: First deploy using API token
+        if: ${{ needs.prepare.outputs.deploy_pypi == 'true' && steps.check_pypi.outputs.PYPI_PKG_EXISTS != 'true' }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           echo "Trusted publishing failed — trying token upload (first release)"
           twine upload publish/*
+
+      - name: Publish wheels to PyPI
+        if: ${{ needs.prepare.outputs.deploy_pypi == 'true' && steps.check_pypi.outputs.PYPI_PKG_EXISTS == 'true' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
