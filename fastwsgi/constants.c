@@ -16,7 +16,7 @@ void init_constants()
     g_cv.SERVER_PORT = PyUnicode_FromString("SERVER_PORT");
     g_cv.SERVER_PROTOCOL = PyUnicode_FromString("SERVER_PROTOCOL");
     g_cv.QUERY_STRING = PyUnicode_FromString("QUERY_STRING");
-    g_cv.PATH_INFO = Py_BuildValue("s", "PATH_INFO");
+    g_cv.PATH_INFO = PyUnicode_FromString("PATH_INFO");
     g_cv.HTTP_ = PyUnicode_FromString("HTTP_");
     g_cv.REMOTE_ADDR = PyUnicode_FromString("REMOTE_ADDR");
     g_cv.CONTENT_LENGTH = PyUnicode_FromString("CONTENT_LENGTH");
@@ -28,7 +28,7 @@ void init_constants()
     g_cv.wsgi_multithread = PyUnicode_FromString("wsgi.multithread");
     g_cv.wsgi_multiprocess = PyUnicode_FromString("wsgi.multiprocess");
     g_cv.wsgi_input = PyUnicode_FromString("wsgi.input");
-    g_cv.wsgi_ver_1_0 = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
+    g_cv.wsgi_ver_1_0 = Py_BuildValue("(ii)", 1, 0);
 
     g_cv.http_scheme = PyUnicode_FromString("http");
     g_cv.HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");
