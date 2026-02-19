@@ -241,12 +241,26 @@ jobs:
               exit 1
           fi
 
+      - name: Collect distributions
+        run: |
+          mkdir publish
+          cp dist/* publish/
+          cp dist-wheels/* publish/
+          ls -lah publish
+    
       - name: Publish wheels to PyPI
+        id: publish_whl
         if: ${{ needs.prepare.outputs.deploy_pypi == 'true' }}
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist-wheels/
+          packages-dir: publish
 
-      - name: Publish sdist to PyPI
-        if: ${{ needs.prepare.outputs.deploy_pypi == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: First upload using API token
+        if: ${{ needs.prepare.outputs.deploy_pypi && steps.publish_whl.outcome == 'failure' }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          echo "Trusted publishing failed — trying token upload (first release)"
+          twine upload publish/*
