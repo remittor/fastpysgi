@@ -95,15 +95,21 @@ class build_all(build_ext):
         for ext in self.extensions:
             if ext == module:
                 if compiler_type == 'msvc':
-                    ext.extra_compile_args = [ '/Oi', '/Oy-', '/W3', '/WX-', '/Gd', '/GS' ]
+                    ext.extra_compile_args += [ '/Oi', '/Oy-', '/W3', '/WX-', '/Gd', '/GS' ]
                     ext.extra_compile_args += [ '/Zc:forScope', '/Zc:inline', '/fp:precise', '/analyze-' ]
+                    ext.extra_compile_args += ["/wd4702"]  # disable unreachable code warning
                 else:
-                    ext.extra_compile_args = [ "-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall" ]
+                    ext.extra_compile_args += [ "-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall" ]
                     ext.extra_compile_args += [ "-Wno-unused-function", "-Wno-unused-variable" ]
+                    ext.extra_compile_args += [ "-Wno-unreachable-code" ]  # disable unreachable code warning
+                    ext.extra_compile_args += [ "-ffunction-sections", "-fdata-sections" ]
                     if compiler.startswith("gcc") and compiler_ver_major >= 8:
                         ext.extra_compile_args += [ "-Wno-unused-but-set-variable" ]
                     if compiler.startswith("clang") and compiler_ver_major >= 13:
                         ext.extra_compile_args += [ "-Wno-unused-but-set-variable" ]
+                    if compiler.startswith("gcc") and sys.platform.startswith("linux"):
+                        ext.extra_link_args += [ "-Wl,--gc-sections" ]
+                        ext.extra_link_args += [ "-Wl,-O1" ]
         
         build_ext.build_extensions(self)
 
