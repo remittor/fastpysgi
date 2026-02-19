@@ -18,7 +18,7 @@ on:
       upload_whl:
         description: 'Upload WHL'
         required: false
-        default: 'false'
+        default: 'true'
         type: choice
         options:
         - true
@@ -26,7 +26,7 @@ on:
       test_build:
         description: 'Test build'
         required: false
-        default: 'false'
+        default: 'true'
         type: choice
         options:
         - true
@@ -37,7 +37,7 @@ on:
         default: ''
         type: string
 
-permissions: {}
+permissions: { }
 
 env:
   IS_PUBLISHED_RELEASE: ${{ github.event_name == 'release' && github.event.action == 'published' }}
@@ -74,6 +74,7 @@ jobs:
           echo "TAG_SUFFIX=$TAG_SUFFIX" >> $GITHUB_OUTPUT
           
   build-wheels:
+    needs: prepare
     name: "${{ matrix.os }}: ${{ matrix.cibw_arch }}"
     runs-on: ${{ matrix.os }}
     strategy:
@@ -130,8 +131,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ 'prepare', 'build-wheels' ]
     permissions:
+      contents: write
       id-token: write
-
+    strategy:
+      max-parallel: 1
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v5
@@ -180,19 +183,21 @@ jobs:
           echo "WHL_VER=$WHL_VER" >> $GITHUB_ENV
 
       - name: Upload WHL
+        if: ${{ github.event.inputs.upload_whl == 'true' || needs.prepare.outputs.deploy_pypi == 'true' }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WHL_TAG: v${{ env.WHL_VER }}${{ needs.prepare.outputs.tag_suffix }}
         with:
           draft: ${{ env.TEST_BUILD == 'true' }}
           prerelease: true
-          tag_name: v${{ env.WHL_VER }}${{ needs.prepare.outputs.tag_suffix }}
+          tag_name: ${{ env.WHL_TAG }}
           name: FastPySGI v${{ env.WHL_VER }}
           body: |
             FastPySGI v${{ env.WHL_VER }}
           files: dist-wheels/fastpysgi-*.whl
 
-      - name: Verify version matches git tag (only release)
+      - name: Verify version matches git tag (only PyPI release)
         if: ${{ needs.prepare.outputs.deploy_pypi == 'true' && github.event_name == 'release' }}
         run: |
           echo "GITHUB_REF_NAME = $GITHUB_REF_NAME"
