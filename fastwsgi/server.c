@@ -864,7 +864,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 
     int hr = init_srv();
     if (hr) {
-        LOGc("%s: critical error = %d", hr);
+        LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
     }
     return PyLong_FromLong(hr);
