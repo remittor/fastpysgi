@@ -1,6 +1,10 @@
 #include <stdbool.h>
 #include "start_response.h"
 
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
+#include <traceback.h>
+#endif
+
 static
 bool is_valid_status(PyObject * status)
 {
@@ -41,13 +45,48 @@ bool is_valid_headers(PyObject * headers)
 }
 
 static
+void log_exc_info(PyObject * exc_info)
+{
+    if (exc_info && PyTuple_Check(exc_info)) {
+        PyObject * type_str  = PyObject_Str(PyTuple_GET_ITEM(exc_info, 0));
+        PyObject * value_str = PyObject_Str(PyTuple_GET_ITEM(exc_info, 1));
+        LOGe("start_response: Exception: %s: %s", type_str ? PyUnicode_AsUTF8(type_str) : "<unknown>", value_str ? PyUnicode_AsUTF8(value_str) : "<unknown>");
+        Py_XDECREF(type_str);
+        Py_XDECREF(value_str);
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
+        PyObject * tb_obj = PyTuple_GET_ITEM(exc_info, 2);
+        if (tb_obj && PyTraceBack_Check(tb_obj)) {
+            PyTracebackObject * tb = (PyTracebackObject *)tb_obj;
+            PyFrameObject * frame = tb->tb_frame;
+            if (frame) {
+                int lineno = PyFrame_GetLineNumber(frame);
+                PyCodeObject * code = PyFrame_GetCode(frame);
+                if (code) {
+                    PyObject * co_filename = PyObject_GetAttrString((PyObject *)code, "co_filename");
+                    PyObject * co_name     = PyObject_GetAttrString((PyObject *)code, "co_name");
+                    const char * filename  = co_filename ? PyUnicode_AsUTF8(co_filename) : NULL;
+                    const char * funcname  = co_name     ? PyUnicode_AsUTF8(co_name)     : NULL;
+                    LOGe("start_response: Exception at %s:%d in %s()", filename ? filename : "<unknown>", lineno, funcname ? funcname : "<unknown>");
+                    Py_XDECREF(co_filename);
+                    Py_XDECREF(co_name);
+                }
+                Py_XDECREF(code);
+            }
+        }
+#endif
+    }
+}
+
+static
 bool is_valid_exc_info(StartResponse * sr)
 {
     if (sr->exc_info && sr->exc_info != Py_None) {
-        if (PyTuple_Check(sr->exc_info))
-            if (PyTuple_GET_SIZE(sr->exc_info) == 3)
+        if (PyTuple_Check(sr->exc_info)) {
+            if (PyTuple_GET_SIZE(sr->exc_info) == 3) {
+                log_exc_info(sr->exc_info);
                 return true;
-        
+            }
+        }
         LOGc("start_response: argument 3 (exc_info) expects a 3-tuple, got '%s' instead.", Py_TYPE(sr->exc_info)->tp_name);
         return false;
     }
