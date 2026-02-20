@@ -21,6 +21,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
         dict = scope;
         if (key == g_cv.PATH_INFO) {            
             val = PyUnicode_DecodeLatin1(value, vlen, NULL);
+            FIN_IF(!val, -71);
             hr = PyDict_SetItem(scope, g_cv.path, val);
             Py_XDECREF(val);
             FIN_IF(hr, hr);
