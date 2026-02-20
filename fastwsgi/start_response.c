@@ -1,36 +1,6 @@
 #include <stdbool.h>
 #include "start_response.h"
 
-void set_status_error()
-{
-    const char * err_msg = "'status' must be a 3-digit string";
-    PyErr_SetString(PyExc_ValueError, err_msg);
-}
-
-void set_header_tuple_error()
-{
-    const char * err_msg = "start_response: argument 2 expects a list of 2-tuples (str, str)";
-    PyErr_SetString(PyExc_TypeError, err_msg);
-}
-
-void set_header_list_error(PyObject * headers)
-{
-    const char * err_msg = "start_response: argument 2 expects a list of 2-tuples, got '%s' instead.";
-    PyErr_Format(PyExc_TypeError, err_msg, Py_TYPE(headers)->tp_name);
-}
-
-void set_exc_info_type_error(PyObject * exc_info)
-{
-    const char * err_msg = "start_response: argument 3 expects a 3-tuple, got '%s' instead.";
-    PyErr_Format(PyExc_TypeError, err_msg, Py_TYPE(exc_info)->tp_name);
-}
-
-void set_exc_info_missing_error()
-{
-    char* err_msg = "'exc_info' is required in the second call of 'start_response'";
-    PyErr_SetString(PyExc_TypeError, err_msg);
-}
-
 static
 bool is_valid_status(PyObject * status)
 {
@@ -38,7 +8,7 @@ bool is_valid_status(PyObject * status)
         if (PyUnicode_GET_LENGTH(status) >= 3)
             return true;
 
-    set_status_error();
+    LOGc("start_response: argument 1 (status) must be a 3-digit string");
     return false;
 }
 
@@ -51,7 +21,7 @@ bool is_valid_header_tuple(PyObject * tuple)
                 if (PyUnicode_Check(PyTuple_GET_ITEM(tuple, 1)))
                     return true;
 
-    set_header_tuple_error();
+    LOGc("start_response: argument 2 (headers) expects a list of 2-tuples (str, str)");
     return false;
 }
 
@@ -66,7 +36,7 @@ bool is_valid_headers(PyObject * headers)
         }
         return true;
     }
-    set_header_list_error(headers);
+    LOGc("start_response: argument 2 (headers) expects a list of 2-tuples, got '%s' instead.", Py_TYPE(headers)->tp_name);
     return false;
 }
 
@@ -78,11 +48,11 @@ bool is_valid_exc_info(StartResponse * sr)
             if (PyTuple_GET_SIZE(sr->exc_info) == 3)
                 return true;
         
-        set_exc_info_type_error(sr->exc_info);
+        LOGc("start_response: argument 3 (exc_info) expects a 3-tuple, got '%s' instead.", Py_TYPE(sr->exc_info)->tp_name);
         return false;
     }
     if (sr->called == 1) {
-        set_exc_info_missing_error();
+        LOGc("start_response: argument 3 (exc_info) is required in the second call of start_response");
         return false;
     }
     return true;

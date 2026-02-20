@@ -26,9 +26,4 @@ static StartResponse * create_start_response(void)
     return sr;
 }
 
-void set_status_error();
-void set_header_tuple_error();
-void set_header_list_error(PyObject* headers);
-void set_exc_info_type_error(PyObject* exc_info);
-
 #endif
