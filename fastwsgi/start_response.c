@@ -100,11 +100,9 @@ bool is_valid_exc_info(StartResponse * sr)
 static
 PyObject * start_response_call(StartResponse * sr, PyObject * args, PyObject * kwargs)
 {
-    if (sr->called == 1) {
-        Py_CLEAR(sr->status);
-        Py_CLEAR(sr->headers);
-    }
-    sr->exc_info = NULL;
+    Py_CLEAR(sr->status);
+    Py_CLEAR(sr->headers);
+    Py_CLEAR(sr->exc_info);
 
     int rc = PyArg_UnpackTuple(args, "start_response", 2, 3, &sr->status, &sr->headers, &sr->exc_info);
     if (rc == (int)false)
