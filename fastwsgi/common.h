@@ -64,6 +64,7 @@ int get_asctime(char ** asc_time);
 PyObject * get_function(PyObject * object);
 
 
+static
 INLINE
 bool is_stream_notconn(uv_stream_t * handle)
 {
@@ -75,6 +76,7 @@ bool is_stream_notconn(uv_stream_t * handle)
     return false;
 }
 
+static
 INLINE
 int pydict_moveitem(PyObject * dict, PyObject * key, PyObject * value)
 {

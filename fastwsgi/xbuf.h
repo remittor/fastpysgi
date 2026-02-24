@@ -41,8 +41,8 @@ char * xbuf_resize(xbuf_t * buf, size_t need_size, int addon)
     return new_ptr;
 }
 
-INLINE
 static
+INLINE
 char * xbuf_expand(xbuf_t * buf, size_t expand_size)
 {
     const size_t need_size = buf->size + expand_size + 8;
@@ -102,15 +102,15 @@ int xbuf_add(xbuf_t * buf, const void * data, size_t size)
     return buf->size;
 }
 
-INLINE
 static
+INLINE
 int xbuf_add_str(xbuf_t * buf, const char * str)
 {
     return xbuf_add(buf, str, strlen(str));
 }
 
-INLINE
 static
+INLINE
 void xbuf_reset(xbuf_t * buf)
 {
     buf->size = 0;
@@ -118,8 +118,8 @@ void xbuf_reset(xbuf_t * buf)
         buf->data[0] = 0;
 }
 
-INLINE
 static
+INLINE
 void xbuf_free(xbuf_t * buf)
 {
     if (buf->data)

@@ -11,7 +11,7 @@ static
 int set_header(client_t * client, PyObject * key, const char * value, ssize_t length, int flags)
 {
     int hr = 0;
-    ssize_t vlen = (length >= 0) ? length : strlen(value);
+    ssize_t vlen = (length >= 0) ? length : (ssize_t)strlen(value);
     LOGi("set_header: %s = '%.*s'", PyBytes_Check(key) ? PyBytes_AS_STRING(key) : PyUnicode_AsUTF8(key), (int)vlen, value);
     PyObject * dict = NULL;
     PyObject * kname = NULL;
@@ -757,9 +757,9 @@ int build_response(client_t * client, int flags, int status, const void * header
         }
         PyObject * item = NULL;
         for (Py_ssize_t i = 0; /* nothing */ ; i++) {
-            const char * key;
+            const char * key = NULL;
             Py_ssize_t key_len = 0;
-            const char * val;
+            const char * val = NULL;
             Py_ssize_t val_len = 0;
             if (asgi_dict) {
                 Py_XDECREF(item);

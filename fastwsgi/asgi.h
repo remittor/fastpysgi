@@ -72,6 +72,7 @@ int  asgi_future_set_result(void * client, PyObject ** ptr_future, PyObject * re
 int  asgi_future_set_exception(void * _client, PyObject ** ptr_future, const char * fmt, ...);
 
 
+static
 INLINE
 Py_ssize_t asgi_get_data_from_header(PyObject * object, size_t index, const char ** data)
 {

@@ -13,8 +13,9 @@ typedef struct {
 
 extern PyTypeObject StartResponse_Type;
 
+static
 INLINE
-static StartResponse * create_start_response(void)
+StartResponse * create_start_response(void)
 {
     StartResponse * sr = PyObject_NEW(StartResponse, &StartResponse_Type);
     if (sr) {
