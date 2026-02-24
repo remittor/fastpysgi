@@ -455,7 +455,7 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
     }
     else if (client->request.wsgi_input_size == 0) {
         PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
-        Py_DECREF(result);
+        Py_XDECREF(result);
     }
     uint64_t clen = (uint64_t)client->request.wsgi_input_size + length;
     if (clen > g_srv.max_content_length) {
@@ -479,7 +479,7 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
         LOGREPR(LL_TRACE, body_content);  // output only first chunk
     }
     PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.write, body_content, NULL);
-    if (!PyLong_CheckExact(result)) {
+    if (!result || !PyLong_CheckExact(result)) {
         client->error = 1;
         LOGf("Cannot write PyBytes to wsgi_input stream! (ret = None)");
     } else {
@@ -530,10 +530,10 @@ int on_message_complete(llhttp_t * parser)
         wsgi_input = client->request.wsgi_input;
         // Truncate input byte stream to real request content length
         result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.truncate, NULL);
-        Py_DECREF(result);
+        Py_XDECREF(result);
         // Sets the input byte stream position back to 0
         result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
-        Py_DECREF(result);
+        Py_XDECREF(result);
     } else {
         client->request.wsgi_input_size = 0;
         if (client->request.wsgi_input_empty == NULL) {
