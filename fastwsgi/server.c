@@ -825,7 +825,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     }
     rv = get_obj_attr_int(server, "max_content_length");
     if (rv == LLONG_MIN) {
-        rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
+        rv = get_env_int("FASTPYSGI_MAX_CONTENT_LENGTH");
     }
     g_srv.max_content_length = (rv >= 0) ? rv : def_max_content_length;
     if (g_srv.max_content_length >= INT_MAX)
@@ -833,7 +833,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 
     rv = get_obj_attr_int(server, "max_chunk_size");
     if (rv == LLONG_MIN) {
-        rv = get_env_int("FASTWSGI_MAX_CHUNK_SIZE");
+        rv = get_env_int("FASTPYSGI_MAX_CHUNK_SIZE");
     }
     g_srv.max_chunk_size = (rv >= 0) ? (size_t)rv : (size_t)def_max_chunk_size;
     g_srv.max_chunk_size = _min(g_srv.max_chunk_size, MAX_max_chunk_size);
@@ -841,7 +841,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 
     rv = get_obj_attr_int(server, "read_buffer_size");
     if (rv == LLONG_MIN) {
-        rv = get_env_int("FASTWSGI_READ_BUFFER_SIZE");
+        rv = get_env_int("FASTPYSGI_READ_BUFFER_SIZE");
     }
     g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);

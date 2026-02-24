@@ -32,7 +32,7 @@ void set_log_level(int level)
     g_log_level = level;
 }
 
-static const char log_prefix[] = "[FWSGI-X]";
+static const char log_prefix[] = "[FPSGI-X]";
 static const int log_level_pos = 7;
 static const char * log_client_addr = NULL;
 static int log_client_addr_len = 0;
