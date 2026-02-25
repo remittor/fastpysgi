@@ -382,7 +382,7 @@ int asgi_future_set_exception(void * _client, PyObject ** ptr_future, const char
     FIN_IF(!future, -4530982);
 
     va_start(args, fmt);
-    vsprintf(text, fmt, args);
+    vsnprintf(text, sizeof(text), fmt, args);
     va_end(args);
 
     exc_text = PyUnicode_FromString(text);
@@ -550,6 +550,10 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
                 FIN(0);
             }
             if (body_size > 0) {
+                if (client->response.body_chunk_num >= max_preloaded_body_chunks) {
+                    LOGe("%s: too many ASGI body chunks (max = %d), closing connection", __func__, (int)max_preloaded_body_chunks);
+                    FIN(-4570495);
+                }
                 Py_INCREF(body);  // Reason: "body" inserted into body chunks array
                 client->response.body[client->response.body_chunk_num++] = body;
                 client->response.body_preloaded_size += body_size;
@@ -558,6 +562,10 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
             if (latest_body) {
                 client->response.chunked = 2;
                 if (body_size > 0) {
+                    if (client->response.body_chunk_num >= max_preloaded_body_chunks) {
+                        LOGe("%s: no room for footer chunk (max = %d)", __func__, (int)max_preloaded_body_chunks);
+                        FIN(-4570496);
+                    }
                     client->response.body[client->response.body_chunk_num++] = g_cv.footer_last_chunk;
                     Py_INCREF(g_cv.footer_last_chunk);  // Reason: "footer_last_chunk" inserted into body chunks array
                     //client->response.body_preloaded_size += PyBytes_GET_SIZE(g_cv.footer_last_chunk);
