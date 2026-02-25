@@ -235,7 +235,11 @@ fin:
             Py_INCREF(result);
             // complete await current app.send()
             int err = asgi_future_set_result(client, &client->asgi->send.future, result);
-        }        
+            if (err) {
+                LOGe("%s: asgi_future_set_result failed: %d — closing connection", __func__, err);
+                close_conn = 1;
+            }
+        }
         if (client->asgi->send.latest_chunk) {
             LOGd("%s: ASGI last chunk sended!", __func__);
         } else {
@@ -644,9 +648,9 @@ void connection_cb(uv_stream_t * server, int status)
         if (rc)
             ip[0] = 0;
         if (sock_addr.addr.sa_family == AF_INET6) {
-            sprintf(client->remote_addr, "[%s]:%d", ip, (int)sock_addr.in6.sin6_port);
+            sprintf(client->remote_addr, "[%s]:%d", ip, (int)ntohs(sock_addr.in6.sin6_port));
         } else {
-            sprintf(client->remote_addr, "%s:%d", ip, (int)sock_addr.in4.sin_port);
+            sprintf(client->remote_addr, "%s:%d", ip, (int)ntohs(sock_addr.in4.sin_port));
         }
     }
     update_log_prefix(client);
