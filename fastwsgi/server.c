@@ -980,6 +980,9 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         }
         uv_close((uv_handle_t *)&g_srv, NULL);
         uv_loop_close(g_srv.loop);
+        if (g_srv.aio.asyncio) {
+            asyncio_free(&g_srv.aio, false);
+        }
         g_srv_inited = 0;
         memset(&g_srv, 0, sizeof(g_srv));
     }
