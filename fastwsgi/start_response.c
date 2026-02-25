@@ -3,6 +3,7 @@
 
 #if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
 #include <traceback.h>
+#include <frameobject.h>
 #endif
 
 static
@@ -53,7 +54,7 @@ void log_exc_info(PyObject * exc_info)
         LOGe("start_response: Exception: %s: %s", type_str ? PyUnicode_AsUTF8(type_str) : "<unknown>", value_str ? PyUnicode_AsUTF8(value_str) : "<unknown>");
         Py_XDECREF(type_str);
         Py_XDECREF(value_str);
-#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
+#if !defined(PYPY_VERSION_NUM) && PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
         PyObject * tb_obj = PyTuple_GET_ITEM(exc_info, 2);
         if (tb_obj && PyTraceBack_Check(tb_obj)) {
             PyTracebackObject * tb = (PyTracebackObject *)tb_obj;
