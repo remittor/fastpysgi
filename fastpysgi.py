@@ -1,7 +1,7 @@
 import os
 import sys
 import signal
-import click
+import argparse
 import _fastpysgi
 
 __version__ = '0.1'
@@ -120,27 +120,50 @@ def import_from_string(import_str):
 
 # -------------------------------------------------------------------------------------
 
-@click.command()
-@click.version_option(version=__version__, message="%(version)s")
-@click.option("--host", help="Host the socket is bound to.", type=str, default=server.host, show_default=True)
-@click.option("-p", "--port", help="Port the socket is bound to.", type=int, default=server.port, show_default=True)
-@click.option("-l", "--loglevel", help="Logging level.", type=int, default=server.loglevel, show_default=True)
-@click.argument(
-    "wsgi_app_import_string",
-    type=str,
-    required=True,
-)
-def run_from_cli(host, port, wsgi_app_import_string, loglevel):
-    """
-    Run FastPySGI server from CLI
-    """
+def run_from_cli():
+    parser = argparse.ArgumentParser(
+        prog="fastpysgi",
+        description="Run FastPySGI server from CLI",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=__version__,
+    )
+    parser.add_argument(
+        "app_import_string",
+        metavar="APP",
+        type=str,
+        help="WSGI/ASGI app in the format module:attribute (e.g. myapp:app)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=server.host,
+        help=f"Host the socket is bound to (default: {server.host})",
+    )
+    parser.add_argument(
+        "-p", "--port",
+        type=int,
+        default=server.port,
+        help=f"Port the socket is bound to (default: {server.port})",
+    )
+    parser.add_argument(
+        "-l", "--loglevel",
+        type=int,
+        default=server.loglevel,
+        help=f"Logging level 0..8 (default: {server.loglevel})",
+    )
+
+    args = parser.parse_args()
+
     try:
-        wsgi_app = import_from_string(wsgi_app_import_string)
+        app = import_from_string(args.app_import_string)
     except ImportError as e:
-        print(f"Error importing WSGI app: {e}")
+        print(f"Error importing WSGI app: {e}", file=sys.stderr)
         sys.exit(1)
 
-    server.init(wsgi_app, host, port, loglevel)
+    server.init(app, args.host, args.port, args.loglevel)
     print(f"FastPySGI server listening at http://{server.host}:{server.port}")
     server.run()
 

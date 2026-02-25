@@ -1,17 +1,29 @@
-from click.testing import CliRunner
+import os
+import sys
+import subprocess
 
-from fastpysgi import run_from_cli
 from fastpysgi import __version__ as fastpysgi_version
 
 
-def call_fastwsgi(fnc=None, parameters=None, arguments=None, envs=None):
-    fnc = fnc or run_from_cli
-    runner = CliRunner()
-    envs = envs or {}
+def call_fastwsgi(parameters = None, arguments = None, envs = None):
     arguments = arguments or []
     parameters = parameters or []
-    # catch exceptions enables debugger
-    return runner.invoke(fnc, args=arguments + parameters , env=envs, catch_exceptions=False)
+    envs = envs or {}
+    env = os.environ.copy()
+    env.update(envs)
+
+    proc = subprocess.run(
+        ["fastpysgi"] + arguments + parameters,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    class Result:
+        exit_code = proc.returncode
+        output = proc.stdout + proc.stderr
+
+    return Result()
 
 
 class TestCLI:
@@ -28,4 +40,4 @@ class TestCLI:
     def test_run_from_cli_invalid_module(self):
         result = call_fastwsgi(arguments=["module:wrong"])
         assert result.exit_code == 1
-        assert result.output.strip() == "Error importing WSGI app: No module named 'module'"
+        assert "Error importing WSGI app: No module named 'module'" in result.output
