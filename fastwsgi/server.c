@@ -785,10 +785,8 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         return PyLong_FromLong(-1011);
     }
     if (asgi_app_check(app) == true) {
-        LOGn("%s: Detect ASGI app", __func__);
         g_srv.asgi_app = app;
     } else {
-        LOGn("%s: Detect WSGI app", __func__);
         g_srv.wsgi_app = app;
     }
     const char * host = get_obj_attr_str(server, "host");
@@ -870,6 +868,13 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     if (hr) {
         LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
+    } else {
+        const char * app = (g_srv.asgi_app) ? "ASGI" : "WSGI";
+        int saved_level = g_log_level;
+        set_log_level(LL_INFO);
+        LOGi("host: \"%s\", port: %d, app: %s, hook_sigint: %d, nowait.mode: %d, loglevel: %d",
+            g_srv.host, g_srv.port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
+        set_log_level(saved_level);
     }
     return PyLong_FromLong(hr);
 }

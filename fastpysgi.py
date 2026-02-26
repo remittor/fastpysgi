@@ -176,8 +176,8 @@ def run(app = None, host = None, port = None, loglevel = None, workers = None, w
         app = wsgi_app
     if app is None:
         raise Exception("app not specify.")
-    print("FastPySGI server running on PID:", os.getpid())
     server.init(app, host, port, loglevel, workers)
     addon = " multiple workers" if server.num_workers > 1 else ""
     print(f"FastPySGI server{addon} listening at http://{server.host}:{server.port}")
+    print(f"FastPySGI server running on PID: {os.getpid()}")
     server.run()
