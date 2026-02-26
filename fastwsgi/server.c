@@ -869,14 +869,20 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
     } else {
+        const char * ver = (strlen(FASTPYSGI_VERSION) == 0) ? "<unknown>" : FASTPYSGI_VERSION;
         const char * app = (g_srv.asgi_app) ? "ASGI" : "WSGI";
         int saved_level = g_log_level;
         set_log_level(LL_INFO);
-        LOGi("host: \"%s\", port: %d, app: %s, hook_sigint: %d, nowait.mode: %d, loglevel: %d",
-            g_srv.host, g_srv.port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
+        LOGi("version: %s, host: \"%s\", port: %d, app: %s, hook_sigint: %d, nowait.mode: %d, loglevel: %d",
+            ver, g_srv.host, g_srv.port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
         set_log_level(saved_level);
     }
     return PyLong_FromLong(hr);
+}
+
+PyObject * get_version(PyObject * Py_UNUSED(self))
+{
+    return PyUnicode_FromString(FASTPYSGI_VERSION);
 }
 
 PyObject * change_setting(PyObject * Py_UNUSED(self), PyObject * args)

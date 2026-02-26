@@ -6,6 +6,8 @@
 #include "uv-common.h"
 #include <stdbool.h>
 
+#include "version.h"
+
 #if defined(_MSC_VER)
 #define vsnprintf _vsnprintf
 #define strncasecmp _strnicmp

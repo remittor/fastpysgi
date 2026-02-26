@@ -1,0 +1,6 @@
+#ifndef FASTPYSGI_VERSION_H_
+#define FASTPYSGI_VERSION_H_
+
+#define FASTPYSGI_VERSION ""
+
+#endif

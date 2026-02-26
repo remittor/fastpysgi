@@ -2,6 +2,7 @@
 #include "server.h"
 
 static PyMethodDef FastPySgiFunctions[] = {
+    { "get_version", (PyCFunction)get_version, METH_NOARGS, NULL },
     { "init_server", init_server, METH_O, "" },
     { "change_setting", change_setting, METH_VARARGS, NULL },
     { "run_server", run_server, METH_O, NULL },

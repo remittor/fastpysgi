@@ -31,6 +31,19 @@ def get_version():
         return match.group(1)
     raise RuntimeError("Cannot find __version__ in fastpysgi.py")
 
+def set_module_version():
+    ver = get_version()
+    lines = [ ]
+    version_h = os.path.join(os.path.dirname(__file__), "fastwsgi", "version.h")
+    with open(version_h, "r", encoding = "utf-8") as file:
+        for line in file:
+            line = line.rstrip()
+            if line.startswith('#define FASTPYSGI_VERSION "'):
+                line = f'#define FASTPYSGI_VERSION "{ver}"'
+            lines.append(line)
+    with open(version_h, "w", encoding = "utf-8") as file:
+        file.write('\n'.join(lines) + '\n')
+
 def get_compiler_version(exe_name):
     version = None
     ver_major = None
@@ -119,6 +132,8 @@ class build_all(build_ext):
             print(f"Stripping {so_file}")
             subprocess.run( [ "strip", "--strip-unneeded", so_file ], check = True )
 
+
+set_module_version()
 
 setup(
     version = get_version(),
