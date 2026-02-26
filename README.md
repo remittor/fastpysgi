@@ -13,9 +13,9 @@ Its written in C and uses [libuv](https://github.com/libuv/libuv) and [llhttp](h
 
 ## Supported Platforms
 
-| Platform | Linux | MacOs | Windows |
-| :------: | :---: | :---: | :-----: |
-| <b>Support</b>  | :white_check_mark: |  :white_check_mark: |  :white_check_mark: |
+| Platform       | Linux | MacOs | Windows |
+| :------------: | :---: | :---: | :-----: |
+| <b>Support</b> | ✅    |  ✅  |  ✅     |
 
 
 ## Performance
@@ -47,7 +47,7 @@ def app(environ, start_response):
     return [b'Hello, World!']
 
 if __name__ == '__main__':
-    fastpysgi.run(wsgi_app=app, host='0.0.0.0', port=5000)
+    fastpysgi.run(app, host='0.0.0.0', port=5000)
 ```
 
 Run the server using:
@@ -76,7 +76,7 @@ def hello_world():
     return 'Hello, World!', 200
 
 if __name__ == '__main__':
-    fastpysgi.run(wsgi_app=app, host='127.0.0.1', port=5000)
+    fastpysgi.run(app, host='127.0.0.1', port=5000)
 ```
 
 
