@@ -38,7 +38,13 @@ class _Server():
         self.num_workers = 1
         self.worker_list = [ ]
         
+    def check_version(self):
+        so_ver = _fastpysgi.get_version()
+        if so_ver != __version__:
+            raise Exception(f'Incorrect version of module "_fastpysgi" = {so_ver} (expected: {__version__})')
+    
     def init(self, app, host = None, port = None, loglevel = None, workers = None):
+        self.check_version()
         self.app = app
         self.host = host if host else self.host
         self.port = port if port else self.port
