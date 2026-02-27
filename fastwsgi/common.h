@@ -71,7 +71,7 @@ INLINE
 bool is_stream_notconn(uv_stream_t * handle)
 {
     if (!(handle->flags & UV_HANDLE_WRITABLE) ||
-        handle->flags & UV_HANDLE_SHUTTING ||
+        uv__is_stream_shutting(handle) ||
         uv__is_closing(handle)) {
         return true;
     }

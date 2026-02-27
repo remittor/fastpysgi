@@ -32,13 +32,10 @@ else:
 
 if sys.platform.startswith('linux'):
     SOURCES += [
-        'libuv/src/unix/linux-core.c',
-        'libuv/src/unix/linux-inotify.c',
-        'libuv/src/unix/linux-syscalls.c',
+        'libuv/src/unix/linux.c',
         'libuv/src/unix/procfs-exepath.c',
         'libuv/src/unix/proctitle.c',
         'libuv/src/unix/random-sysctl-linux.c',
-        'libuv/src/unix/epoll.c',
     ]
 elif sys.platform == 'darwin':
     SOURCES += [
@@ -48,7 +45,6 @@ elif sys.platform == 'darwin':
         'libuv/src/unix/fsevents.c',
         'libuv/src/unix/kqueue.c',
         'libuv/src/unix/proctitle.c',
-        'libuv/src/unix/pthread-fixes.c',
         'libuv/src/unix/random-getentropy.c',
     ]
 elif sys.platform.startswith(('freebsd', 'dragonfly')):
@@ -113,6 +109,7 @@ def build_libuv(build_ext):
             self.compiler.define_macro('_CRT_SECURE_NO_DEPRECATE', 1)
             self.compiler.define_macro('_CRT_NONSTDC_NO_DEPRECATE', 1)
             self.compiler.define_macro('_WIN32_WINNT', '0x0600')
+            self.compiler.add_library('kernel32')
             self.compiler.add_library('advapi32')
             self.compiler.add_library('iphlpapi')
             self.compiler.add_library('psapi')
@@ -121,3 +118,5 @@ def build_libuv(build_ext):
             self.compiler.add_library('userenv')
             self.compiler.add_library('ws2_32')
             self.compiler.add_library('secur32')
+            self.compiler.add_library('dbghelp')
+            self.compiler.add_library('ole32')
