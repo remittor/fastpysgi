@@ -44,6 +44,23 @@ def set_module_version():
     with open(version_h, "w", encoding = "utf-8") as file:
         file.write('\n'.join(lines) + '\n')
 
+def patch_libuv_src_win_util():
+    lines = [ ]
+    util_c = os.path.join(os.path.dirname(__file__), "libuv", "src", "win", "util.c")
+    with open(util_c, "r", encoding = "utf-8") as file:
+        for line in file:
+            line = line.rstrip()
+            if line.strip() == 'GetSystemTimePreciseAsFileTime(&ft);':
+                lines.append('#if _WIN32_WINNT >= 0x0602')
+                lines.append('        GetSystemTimePreciseAsFileTime(&ft); // patched')
+                lines.append('#else')
+                lines.append('        GetSystemTimeAsFileTime(&ft); // patched')
+                lines.append('#endif')
+            else:
+                lines.append(line)
+    with open(util_c, "w", encoding = "utf-8") as file:
+        file.write('\n'.join(lines) + '\n')
+
 def get_compiler_version(exe_name):
     version = None
     ver_major = None
@@ -134,6 +151,7 @@ class build_all(build_ext):
 
 
 set_module_version()
+patch_libuv_src_win_util()
 
 setup(
     version = get_version(),
