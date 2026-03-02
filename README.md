@@ -11,6 +11,11 @@ FastPySGI is an ultra fast WSGI/ASGI server for Python 3.
 Its written in C and uses [libuv](https://github.com/libuv/libuv) and [llhttp](https://github.com/nodejs/llhttp) under the hood for blazing fast performance.
 
 
+## Dependencies
+
+None
+
+
 ## Supported Platforms
 
 | Platform       | Linux | MacOs | Windows |
@@ -74,6 +79,23 @@ app = Flask(__name__)
 @app.get('/')
 def hello_world():
     return 'Hello, World!', 200
+
+if __name__ == '__main__':
+    fastpysgi.run(app, host='127.0.0.1', port=5000)
+```
+
+
+## Example usage with FastAPI
+
+```python
+import fastpysgi
+import fastapi
+
+app = fastapi.FastAPI()
+
+@app.get("/")
+async def hello_world():
+    return fastapi.responses.PlainTextResponse(b"Hello, World!\n")
 
 if __name__ == '__main__':
     fastpysgi.run(app, host='127.0.0.1', port=5000)
