@@ -142,7 +142,67 @@ PyObject * get_function(PyObject * object)
                 return met;
             }
         }
+        /*
+        if (PyCFunction_Check(call))
+            return call;
+
+        const char * type_name = Py_TYPE(call)->tp_name;
+        
+        if (strcmp(type_name, "method-wrapper") == 0)
+            return call;
+        
+        if (strcmp(type_name, "builtin_function_or_method") == 0)
+            return call;
+        */
         Py_DECREF(call);
     }
     return NULL;
+}
+
+int get_func_sig_arg_count(PyObject * func)
+{
+    int hr = -1;
+    PyObject * params = NULL;
+    PyObject * sig = NULL;
+    PyObject * inspect = PyImport_ImportModule("inspect");
+    FIN_IF(!inspect, -2);
+    sig = PyObject_CallMethod(inspect, "signature", "O", func);
+    if (!sig) PyErr_Clear();
+    FIN_IF(!sig, -3);
+    params = PyObject_GetAttrString(sig, "parameters");
+    FIN_IF(!params, -4);
+    hr = (int)PyMapping_Size(params);
+fin:
+    Py_XDECREF(params);
+    Py_XDECREF(sig);
+    Py_XDECREF(inspect);
+    return hr;
+}
+
+bool is_coroutine_function(PyObject * func)
+{
+    int hr = -1;
+    PyObject * call_attr = NULL;
+    PyObject * ret = NULL;
+    PyObject * asyncio = NULL;
+    asyncio = PyImport_ImportModule("asyncio");
+    FIN_IF(!asyncio, -3);
+    ret = PyObject_CallMethod(asyncio, "iscoroutinefunction", "O", func);
+    if (!ret) PyErr_Clear();
+    FIN_IF(!ret, -4);
+    hr = PyObject_IsTrue(ret) ? 0 : -1;
+    if (hr) {
+        Py_XDECREF(ret);
+        call_attr = PyObject_GetAttrString(func, "__call__");
+        FIN_IF(!call_attr, -5);
+        ret = PyObject_CallMethod(asyncio, "iscoroutinefunction", "O", call_attr);
+        if (!ret) PyErr_Clear();
+        FIN_IF(!ret, -6);
+        hr = PyObject_IsTrue(ret) ? 0 : -1;
+    }
+fin:
+    Py_XDECREF(ret);
+    Py_XDECREF(call_attr);
+    Py_XDECREF(asyncio);
+    return (hr == 0) ? true : false;
 }

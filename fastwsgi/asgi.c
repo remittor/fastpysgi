@@ -5,16 +5,15 @@
 
 bool asgi_app_check(PyObject * app)
 {
-    int hr = -1;
-    PyObject * func = get_function(app);
-    FIN_IF(!func, -1);
-    PyCodeObject * code = (PyCodeObject *)PyFunction_GET_CODE(func);
-    if ((code->co_flags & CO_COROUTINE) != 0 || code->co_argcount == 1) {
-        FIN(0);
-    }
-fin:
-    Py_DECREF(func);
-    return (hr == 0) ? true : false;
+    return is_coroutine_function(app);
+}
+
+bool asgi_app_check2(PyObject * app)
+{
+    int argcnt = get_func_sig_arg_count(app);
+    // ASGI: (scope, receive, send) = 3 arguments
+    // WSGI: (environ, start_response) = 2 arguments
+    return (argcnt == 3) ? true : false;
 }
 
 int64_t g_idle_num = 0;

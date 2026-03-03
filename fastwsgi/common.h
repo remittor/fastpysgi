@@ -64,6 +64,8 @@ const char * get_obj_attr_str(PyObject * obj, const char * name);
 int get_asctime(char ** asc_time);
 
 PyObject * get_function(PyObject * object);
+int get_func_sig_arg_count(PyObject * func);
+bool is_coroutine_function(PyObject * func);
 
 
 static

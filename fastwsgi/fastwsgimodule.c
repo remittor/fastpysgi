@@ -3,7 +3,7 @@
 
 static PyMethodDef FastPySgiFunctions[] = {
     { "get_version", (PyCFunction)get_version, METH_NOARGS, NULL },
-    { "init_server", init_server, METH_O, "" },
+    { "init_server", init_server, METH_O, NULL },
     { "change_setting", change_setting, METH_VARARGS, NULL },
     { "run_server", run_server, METH_O, NULL },
     { "run_nowait", run_nowait, METH_O, NULL },
