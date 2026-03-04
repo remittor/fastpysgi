@@ -57,19 +57,23 @@ static PyMethodDef uni_loop_method = {
 int asyncio_init(asyncio_t * aio)
 {
     int hr = 0;
+    PyObject * set_event_loop = NULL;
+    PyObject * new_event_loop = NULL;
+    PyObject * res = NULL;
+    
     memset(aio, 0, sizeof(asyncio_t));
     
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
 
-    PyObject * mdict = PyModule_GetDict(aio->asyncio);
-    // "new_event_loop"); // "get_running_loop");
-    PyObject * get_event_loop = PyDict_GetItemString(mdict, "get_event_loop");
-    FIN_IF(!get_event_loop, 4500015);
-    FIN_IF(!PyCallable_Check(get_event_loop), -4500016);
-    
-    aio->loop.self = PyObject_CallObject(get_event_loop, NULL);
-    FIN_IF(!aio->loop.self, -4500020);
+    set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
+    FIN_IF(!set_event_loop, 4500017);
+    new_event_loop = PyObject_GetAttrString(aio->asyncio, "new_event_loop");
+    FIN_IF(!new_event_loop, 4500018);
+    aio->loop.self = PyObject_CallObject(new_event_loop, NULL);
+    FIN_IF(!aio->loop.self, 4500020);
+    res = PyObject_CallFunctionObjArgs(set_event_loop, aio->loop.self, NULL);
+    FIN_IF(!res, 4500021);
 
     aio->loop.run_forever = PyObject_GetAttrString(aio->loop.self, "run_forever");
     FIN_IF(!aio->loop.run_forever, -4500027);
@@ -116,6 +120,9 @@ int asyncio_init(asyncio_t * aio)
 
     hr = 0;
 fin:
+    Py_XDECREF(set_event_loop);
+    Py_XDECREF(new_event_loop);
+    Py_XDECREF(res);
     if (hr) {
         asyncio_free(aio, false);
     }
