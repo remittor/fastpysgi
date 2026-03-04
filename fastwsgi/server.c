@@ -869,6 +869,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     if (hr) {
         LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
+        memset(&g_srv, 0, sizeof(g_srv));
     } else {
         const char * ver = (strlen(FASTPYSGI_VERSION) == 0) ? "<unknown>" : FASTPYSGI_VERSION;
         const char * app = (g_srv.asgi_app) ? "ASGI" : "WSGI";
@@ -992,11 +993,11 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         }
         uv_close((uv_handle_t *)&g_srv, NULL);
         uv_loop_close(g_srv.loop);
-        if (g_srv.aio.asyncio) {
-            asyncio_free(&g_srv.aio, false);
-        }
-        g_srv_inited = 0;
-        memset(&g_srv, 0, sizeof(g_srv));
     }
+    if (g_srv.aio.asyncio) {
+        asyncio_free(&g_srv.aio, false);
+    }
+    g_srv_inited = 0;
+    memset(&g_srv, 0, sizeof(g_srv));
     Py_RETURN_NONE;
 }
