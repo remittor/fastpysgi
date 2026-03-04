@@ -23,6 +23,12 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
     bool relax = false;
     PyObject * res = NULL;
 
+    if (g_srv.exit_code != 0) {
+        LOGd("%s: exit_code = %d", __func__, g_srv.exit_code);
+        res = PyObject_CallMethod(g_srv.aio.loop.self, "stop", NULL);
+        Py_XDECREF(res);
+        Py_RETURN_NONE;
+    }
     g_srv.num_loop_cb = 0;  // reset cb counter
 
     uv_run(g_srv.loop, UV_RUN_NOWAIT);

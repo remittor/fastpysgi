@@ -671,6 +671,7 @@ void signal_handler(uv_signal_t * req, int signum)
             exit(0);
         }
         g_srv.exit_code = 1; // server interrupted by SIGINT
+        LOGw("%s: set exit_code = %d", __func__, g_srv.exit_code);
     }
 }
 
@@ -932,7 +933,7 @@ PyObject * run_server(PyObject * self, PyObject * server)
     const char * reason = (g_srv.exit_code == 1) ? "(SIGINT)" : "";
     LOGn("%s: FIN %s", __func__, reason);
     PyObject * rc = close_server(self, server);
-    Py_DECREF(rc);
+    Py_XDECREF(rc);
     return PyLong_FromLong(g_srv.exit_code);
 }
 
