@@ -675,7 +675,7 @@ void signal_handler(uv_signal_t * req, int signum)
     }
 }
 
-int init_srv()
+int init_srv(PyObject * aio_loop)
 {
     int hr = -1;
     if (g_srv_inited)
@@ -689,7 +689,7 @@ int init_srv()
     PyType_Ready(&StartResponse_Type);
     if (g_srv.asgi_app) {
         PyType_Ready(&ASGI_Type);
-        hr = asyncio_init(&g_srv.aio);
+        hr = asyncio_init(&g_srv.aio, aio_loop);
         FIN_IF(hr, hr);
     }
 
@@ -754,8 +754,6 @@ fin:
 
         if (g_srv.aio.asyncio)
             asyncio_free(&g_srv.aio, false);
-
-        memset(&g_srv, 0, sizeof(g_srv));
     }    
     return hr;
 }
@@ -763,6 +761,7 @@ fin:
 PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 {
     int64_t rv;
+    PyObject * aio_loop = NULL;
 
     update_log_prefix(NULL);
     if (g_srv_inited) {
@@ -790,6 +789,14 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     } else {
         g_srv.wsgi_app = app;
     }
+    if (g_srv.asgi_app) {
+        PyObject * loop = PyObject_GetAttrString(server, "loop");
+        Py_XDECREF(loop);
+        if (loop && loop != Py_None) {
+            aio_loop = loop;
+        }
+    }    
+
     const char * host = get_obj_attr_str(server, "host");
     if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {
         PyErr_Format(PyExc_ValueError, "Option host not defined");
@@ -865,7 +872,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     rv = get_obj_attr_int(server, "nowait");
     g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
 
-    int hr = init_srv();
+    int hr = init_srv(aio_loop);
     if (hr) {
         LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);

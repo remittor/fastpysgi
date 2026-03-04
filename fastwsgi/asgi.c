@@ -54,7 +54,7 @@ static PyMethodDef uni_loop_method = {
     "uni_loop", uni_loop, METH_NOARGS, ""
 }; 
 
-int asyncio_init(asyncio_t * aio)
+int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
 {
     int hr = 0;
     PyObject * set_event_loop = NULL;
@@ -66,15 +66,21 @@ int asyncio_init(asyncio_t * aio)
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
 
-    set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
-    FIN_IF(!set_event_loop, 4500017);
-    new_event_loop = PyObject_GetAttrString(aio->asyncio, "new_event_loop");
-    FIN_IF(!new_event_loop, 4500018);
-    aio->loop.self = PyObject_CallObject(new_event_loop, NULL);
-    FIN_IF(!aio->loop.self, 4500020);
-    res = PyObject_CallFunctionObjArgs(set_event_loop, aio->loop.self, NULL);
-    FIN_IF(!res, 4500021);
-
+    if (!aio_loop) {
+        set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
+        FIN_IF(!set_event_loop, 4500017);
+        new_event_loop = PyObject_GetAttrString(aio->asyncio, "new_event_loop");
+        FIN_IF(!new_event_loop, 4500018);
+        aio->loop.self = PyObject_CallObject(new_event_loop, NULL);
+        FIN_IF(!aio->loop.self, 4500020);
+        res = PyObject_CallFunctionObjArgs(set_event_loop, aio->loop.self, NULL);
+        FIN_IF(!res, 4500021);
+    } else {
+        aio->loop.self = aio_loop;
+        Py_INCREF(aio->loop.self);
+        aio->loop.borrowed = 1;
+        LOGt("%s: loop.borrowed = %d", __func__, aio->loop.borrowed);
+    }
     aio->loop.run_forever = PyObject_GetAttrString(aio->loop.self, "run_forever");
     FIN_IF(!aio->loop.run_forever, -4500027);
     FIN_IF(!PyCallable_Check(aio->loop.run_forever), -4500028);

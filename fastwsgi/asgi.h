@@ -9,6 +9,7 @@ typedef struct {
     PyObject * asyncio;  // module
     PyObject * uni_loop; // united loop
     struct {
+        int borrowed;
         PyObject * self;
         PyObject * run_forever;
         PyObject * run_until_complete;
@@ -25,7 +26,7 @@ typedef struct {
     } future;
 } asyncio_t;
 
-int asyncio_init(asyncio_t * aio);
+int asyncio_init(asyncio_t * aio, PyObject * aio_loop);
 int asyncio_free(asyncio_t * aio, bool free_self);
 
 
