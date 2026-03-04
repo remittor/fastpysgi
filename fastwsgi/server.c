@@ -928,12 +928,7 @@ PyObject * run_server(PyObject * self, PyObject * server)
         return PyLong_FromLong(-1);
     }    
     if (g_srv.asgi_app) {
-        asyncio_t * aio = &g_srv.aio;
-        PyObject * res;
-        res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, aio->uni_loop, NULL);
-        Py_XDECREF(res);
-        res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
-        Py_XDECREF(res);
+        aio_loop_run(&g_srv.aio);
     }
     else {
         uv_run(g_srv.loop, UV_RUN_DEFAULT);
@@ -997,6 +992,9 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         if (g_srv.worker.type == UV_IDLE) {
             uv_idle_stop(&g_srv.worker);
             uv_close((uv_handle_t *)&g_srv.worker, NULL);
+        }
+        if (g_srv.aio.asyncio) {
+            aio_loop_shutdown(&g_srv.aio);
         }
         uv_close((uv_handle_t *)&g_srv, NULL);
         uv_loop_close(g_srv.loop);

@@ -61,8 +61,6 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
     PyObject * new_event_loop = NULL;
     PyObject * res = NULL;
     
-    memset(aio, 0, sizeof(asyncio_t));
-    
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
 
@@ -154,6 +152,24 @@ int asyncio_free(asyncio_t * aio, bool free_self)
         if (free_self)
             free(aio);
     }
+    return 0;
+}
+
+// -----------------------------------------------------------------------------------
+
+int aio_loop_run(asyncio_t * _aio)
+{
+    PyObject * res = NULL;
+    asyncio_t * aio = (_aio == NULL) ? &g_srv.aio : _aio;
+    res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, aio->uni_loop, NULL);
+    Py_XDECREF(res);
+    res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
+    Py_XDECREF(res);
+    return 0;
+}
+
+int aio_loop_shutdown(asyncio_t * aio)
+{
     return 0;
 }
 

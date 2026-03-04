@@ -29,6 +29,9 @@ typedef struct {
 int asyncio_init(asyncio_t * aio, PyObject * aio_loop);
 int asyncio_free(asyncio_t * aio, bool free_self);
 
+int aio_loop_run(asyncio_t * aio);
+int aio_loop_shutdown(asyncio_t * aio);
+
 
 typedef struct {
     PyObject   ob_base;
