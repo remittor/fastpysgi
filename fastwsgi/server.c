@@ -795,7 +795,12 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         if (loop && loop != Py_None) {
             aio_loop = loop;
         }
-    }    
+        rv = get_obj_attr_int(server, "lifespan");  // 0 = off, 1 = on, 2 = auto (default)
+        g_srv.aio.lifespan.mode = (rv >= 0 && rv <= 2) ? (int)rv : (int)LS_MODE_AUTO;
+
+        rv = get_obj_attr_int(server, "lifespan_fose");
+        g_srv.aio.lifespan.fail_on_startup_error = (rv == 1) ? 1 : 0;
+    }
 
     const char * host = get_obj_attr_str(server, "host");
     if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {

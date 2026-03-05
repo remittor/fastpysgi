@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "request.h"
+#include "lifespan.h"
 
 
 typedef struct {
@@ -24,6 +25,7 @@ typedef struct {
         PyObject * self;
         PyObject * set_result;
     } future;
+    lifespan_t     lifespan;    // ASGI lifespan state
 } asyncio_t;
 
 int asyncio_init(asyncio_t * aio, PyObject * aio_loop);

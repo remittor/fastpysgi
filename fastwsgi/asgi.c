@@ -1,5 +1,6 @@
 #include "asgi.h"
 #include "server.h"
+#include "lifespan.h"
 #include "constants.h"
 
 
@@ -122,7 +123,7 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
     FIN_IF(!aio->uni_loop, -4500213);
     FIN_IF(!PyCallable_Check(aio->uni_loop), -4500214);
 
-    hr = 0;
+    hr = lifespan_init(&aio->lifespan);
 fin:
     Py_XDECREF(set_event_loop);
     Py_XDECREF(new_event_loop);
@@ -136,6 +137,7 @@ fin:
 int asyncio_free(asyncio_t * aio, bool free_self)
 {
     if (aio) {
+        lifespan_free(&aio->lifespan);
         Py_XDECREF(aio->uni_loop);
         Py_XDECREF(aio->future.set_result);
         Py_XDECREF(aio->future.self);
@@ -161,6 +163,12 @@ int aio_loop_run(asyncio_t * _aio)
 {
     PyObject * res = NULL;
     asyncio_t * aio = (_aio == NULL) ? &g_srv.aio : _aio;
+    int hr = lifespan_startup(&aio->lifespan);
+    if (hr) {
+        LOGc("%s: lifespan startup failed (rc = %d) -> aborting", __func__, hr);
+        g_srv.exit_code = 17;
+        return 17;
+    }
     res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, aio->uni_loop, NULL);
     Py_XDECREF(res);
     res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
@@ -168,8 +176,10 @@ int aio_loop_run(asyncio_t * _aio)
     return 0;
 }
 
-int aio_loop_shutdown(asyncio_t * aio)
+int aio_loop_shutdown(asyncio_t * _aio)
 {
+    asyncio_t * aio = (_aio == NULL) ? &g_srv.aio : _aio;
+    lifespan_shutdown(&aio->lifespan);
     return 0;
 }
 
