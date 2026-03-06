@@ -138,20 +138,19 @@ int asyncio_free(asyncio_t * aio, bool free_self)
 {
     if (aio) {
         lifespan_free(&aio->lifespan);
-        Py_XDECREF(aio->uni_loop);
-        Py_XDECREF(aio->future.set_result);
-        Py_XDECREF(aio->future.self);
-        Py_XDECREF(aio->loop.remove_reader);
-        Py_XDECREF(aio->loop.add_reader);
-        Py_XDECREF(aio->loop.create_task);
-        Py_XDECREF(aio->loop.create_future);
-        Py_XDECREF(aio->loop.call_later);
-        Py_XDECREF(aio->loop.call_soon);
-        Py_XDECREF(aio->loop.run_until_complete);
-        Py_XDECREF(aio->loop.run_forever);
-        Py_XDECREF(aio->loop.self);
-        Py_XDECREF(aio->asyncio);
-        memset(aio, 0, sizeof(asyncio_t));
+        Py_CLEAR(aio->uni_loop);
+        Py_CLEAR(aio->future.set_result);
+        Py_CLEAR(aio->future.self);
+        Py_CLEAR(aio->loop.remove_reader);
+        Py_CLEAR(aio->loop.add_reader);
+        Py_CLEAR(aio->loop.create_task);
+        Py_CLEAR(aio->loop.create_future);
+        Py_CLEAR(aio->loop.call_later);
+        Py_CLEAR(aio->loop.call_soon);
+        Py_CLEAR(aio->loop.run_until_complete);
+        Py_CLEAR(aio->loop.run_forever);
+        Py_CLEAR(aio->loop.self);
+        Py_CLEAR(aio->asyncio);
         if (free_self)
             free(aio);
     }
