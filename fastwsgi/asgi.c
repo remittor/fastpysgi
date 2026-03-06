@@ -145,6 +145,7 @@ int asyncio_free(asyncio_t * aio, bool free_self)
         Py_XDECREF(aio->loop.add_reader);
         Py_XDECREF(aio->loop.create_task);
         Py_XDECREF(aio->loop.create_future);
+        Py_XDECREF(aio->loop.call_later);
         Py_XDECREF(aio->loop.call_soon);
         Py_XDECREF(aio->loop.run_until_complete);
         Py_XDECREF(aio->loop.run_forever);
