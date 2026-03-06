@@ -9,6 +9,8 @@
 typedef struct {
     PyObject * asyncio;  // module
     PyObject * uni_loop; // united loop
+    int        idle_num;
+    int        loop_timeout;  // millisec
     struct {
         int borrowed;
         PyObject * self;
@@ -20,6 +22,7 @@ typedef struct {
         PyObject * create_task;
         PyObject * add_reader;
         PyObject * remove_reader;
+        PyObject * relax_timeout;  // sec (float)
     } loop;
     struct {
         PyObject * self;

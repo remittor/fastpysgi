@@ -17,11 +17,8 @@ bool asgi_app_check2(PyObject * app)
     return (argcnt == 3) ? true : false;
 }
 
-int64_t g_idle_num = 0;
-
 PyObject * uni_loop(PyObject * self, PyObject * not_used)
 {
-    bool relax = false;
     PyObject * res = NULL;
 
     if (g_srv.exit_code != 0) {
@@ -35,17 +32,20 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
     uv_run(g_srv.loop, UV_RUN_NOWAIT);
 
     if (g_srv.num_loop_cb == 0 && g_srv.num_writes == 0) {
-        g_idle_num++;
+        if (g_srv.aio.idle_num < LONG_MAX)
+            g_srv.aio.idle_num++;
     } else {
-        g_idle_num = 0;
+        g_srv.aio.idle_num = 0;
     }
-    if (g_idle_num > 10) {
-        relax = true;
-    }
-    if (relax == false) {
+    if (g_srv.aio.idle_num <= 50) {
         res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
     } else {
-        res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_later, g_cv.f0_001, g_srv.aio.uni_loop, NULL);
+        int timeout_ms = uv_backend_timeout(g_srv.loop);
+        if (timeout_ms >= 0 || g_srv.aio.loop.relax_timeout == NULL) {
+            res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
+        } else {
+            res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_later, g_srv.aio.loop.relax_timeout, g_srv.aio.uni_loop, NULL);
+        }
     }
     Py_XDECREF(res);
     Py_RETURN_NONE;
@@ -123,6 +123,8 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
     FIN_IF(!aio->uni_loop, -4500213);
     FIN_IF(!PyCallable_Check(aio->uni_loop), -4500214);
 
+    aio->loop.relax_timeout = (aio->loop_timeout > 0) ? PyFloat_FromDouble((double)aio->loop_timeout / 1000.0) : NULL;
+
     hr = lifespan_init(&aio->lifespan);
 fin:
     Py_XDECREF(set_event_loop);
@@ -141,6 +143,7 @@ int asyncio_free(asyncio_t * aio, bool free_self)
         Py_CLEAR(aio->uni_loop);
         Py_CLEAR(aio->future.set_result);
         Py_CLEAR(aio->future.self);
+        Py_CLEAR(aio->loop.relax_timeout);
         Py_CLEAR(aio->loop.remove_reader);
         Py_CLEAR(aio->loop.add_reader);
         Py_CLEAR(aio->loop.create_task);
