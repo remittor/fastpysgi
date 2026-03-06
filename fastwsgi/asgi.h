@@ -9,6 +9,8 @@
 typedef struct {
     PyObject * asyncio;  // module
     PyObject * uni_loop; // united loop
+    PyObject * uni_loop_periodic;  // united loop for call_later calls
+    int        periodic_armed;     // 1 = call_later already in aio queue
     int        idle_num;
     int        loop_timeout;  // millisec
     struct {

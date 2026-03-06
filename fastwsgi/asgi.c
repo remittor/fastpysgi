@@ -22,7 +22,7 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
     PyObject * res = NULL;
 
     if (g_srv.exit_code != 0) {
-        LOGd("%s: exit_code = %d", __func__, g_srv.exit_code);
+        LOGd("%s: exit_code = %d, stopping asyncio loop", __func__, g_srv.exit_code);
         res = PyObject_CallMethod(g_srv.aio.loop.self, "stop", NULL);
         Py_XDECREF(res);
         Py_RETURN_NONE;
@@ -44,15 +44,28 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
         if (timeout_ms >= 0 || g_srv.aio.loop.relax_timeout == NULL) {
             res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
         } else {
-            res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_later, g_srv.aio.loop.relax_timeout, g_srv.aio.uni_loop, NULL);
+            if (!g_srv.aio.periodic_armed) {
+                g_srv.aio.periodic_armed = 1;
+                res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_later, g_srv.aio.loop.relax_timeout, g_srv.aio.uni_loop_periodic, NULL);
+            }
         }
     }
     Py_XDECREF(res);
     Py_RETURN_NONE;
 }
 
+PyObject * uni_loop_periodic(PyObject * self, PyObject * not_used)
+{
+    g_srv.aio.periodic_armed = 0;
+    return uni_loop(self, not_used);
+}
+
 static PyMethodDef uni_loop_method = {
     "uni_loop", uni_loop, METH_NOARGS, ""
+};
+
+static PyMethodDef uni_loop_periodic_method = {
+    "uni_loop_periodic", uni_loop_periodic, METH_NOARGS, ""
 }; 
 
 int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
@@ -61,7 +74,7 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
     PyObject * set_event_loop = NULL;
     PyObject * new_event_loop = NULL;
     PyObject * res = NULL;
-    
+
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
 
@@ -122,8 +135,14 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
     aio->uni_loop = PyCFunction_New(&uni_loop_method, NULL);
     FIN_IF(!aio->uni_loop, -4500213);
     FIN_IF(!PyCallable_Check(aio->uni_loop), -4500214);
+    
+    aio->uni_loop_periodic = PyCFunction_New(&uni_loop_periodic_method, NULL);
+    FIN_IF(!aio->uni_loop_periodic, -4500223);    
+    FIN_IF(!PyCallable_Check(aio->uni_loop_periodic), -4500224);
 
     aio->loop.relax_timeout = (aio->loop_timeout > 0) ? PyFloat_FromDouble((double)aio->loop_timeout / 1000.0) : NULL;
+    aio->periodic_armed = 0;
+    aio->idle_num = 0;
 
     hr = lifespan_init(&aio->lifespan);
 fin:
@@ -140,6 +159,7 @@ int asyncio_free(asyncio_t * aio, bool free_self)
 {
     if (aio) {
         lifespan_free(&aio->lifespan);
+        Py_CLEAR(aio->uni_loop_periodic);
         Py_CLEAR(aio->uni_loop);
         Py_CLEAR(aio->future.set_result);
         Py_CLEAR(aio->future.self);
@@ -176,6 +196,7 @@ int aio_loop_run(asyncio_t * _aio)
     Py_XDECREF(res);
     res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
     Py_XDECREF(res);
+    LOGd("%s: stopped", __func__);
     return 0;
 }
 
