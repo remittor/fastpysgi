@@ -17,9 +17,14 @@ bool asgi_app_check2(PyObject * app)
     return (argcnt == 3) ? true : false;
 }
 
+#define PTR_SWAP(a, b)  do { void * tmp = (void*)(a); a = b; b = tmp; } while(0)
+
 PyObject * uni_loop(PyObject * self, PyObject * not_used)
 {
     PyObject * res = NULL;
+    uv_metrics_t uv_metrics_list[2];
+    uv_metrics_t * uv_metrics_before = &uv_metrics_list[0];
+    uv_metrics_t * uv_metrics_after  = &uv_metrics_list[1];
 
     if (g_srv.exit_code != 0) {
         LOGd("%s: exit_code = %d, stopping asyncio loop", __func__, g_srv.exit_code);
@@ -29,8 +34,15 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
     }
     g_srv.num_loop_cb = 0;  // reset cb counter
 
-    uv_run(g_srv.loop, UV_RUN_NOWAIT);
-
+    uv_metrics_info(g_srv.loop, uv_metrics_before);
+    while (1) {
+        uv_run(g_srv.loop, UV_RUN_NOWAIT);
+        uv_metrics_info(g_srv.loop, uv_metrics_after);
+        if (uv_metrics_before->events - uv_metrics_before->events == 0) {
+            break;
+        }
+        PTR_SWAP(uv_metrics_before, uv_metrics_after);
+    }
     if (g_srv.num_loop_cb == 0 && g_srv.num_writes == 0) {
         if (g_srv.aio.idle_num < LONG_MAX)
             g_srv.aio.idle_num++;
