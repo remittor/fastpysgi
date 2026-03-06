@@ -795,8 +795,8 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         if (loop && loop != Py_None) {
             aio_loop = loop;
         }
-        rv = get_obj_attr_int(server, "loop_timeout");  // 0 = off, 1 = 1ms (default)
-        g_srv.aio.loop_timeout = (rv >= 0 && rv <= 1000) ? (int)rv : 1;
+        rv = get_obj_attr_int(server, "loop_timeout");  // 0 = off, 1 = 1ms, 3 = 3ms (default)
+        g_srv.aio.loop_timeout = (rv >= 0 && rv <= 1000) ? (int)rv : 3;
 
         rv = get_obj_attr_int(server, "lifespan");  // 0 = off, 1 = on, 2 = auto (default)
         g_srv.aio.lifespan.mode = (rv >= 0 && rv <= 2) ? (int)rv : (int)LS_MODE_AUTO;
