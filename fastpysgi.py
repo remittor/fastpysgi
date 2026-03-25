@@ -23,7 +23,7 @@ class _Server():
         self.port = 5000
         self.backlog = 2048
         self.loglevel = LL_ERROR
-        self.hook_sigint = 2            # 0 = ignore Ctrl-C; 1 = stop server on Ctrl-C; 2 = halt process on Ctrl-C
+        self.hook_sigint = 1            # 0 = ignore Ctrl-C; 1 = stop server on Ctrl-C; 2 = halt process on Ctrl-C
         self.allow_keepalive = True
         self.add_header_date = True
         self.add_header_server = "FastPySGI/{}".format(__version__)

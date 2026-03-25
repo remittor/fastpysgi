@@ -828,7 +828,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     g_srv.backlog = (int)backlog;
 
     rv = get_obj_attr_int(server, "hook_sigint");
-    g_srv.hook_sigint = (rv >= 0) ? (int)rv : 2;
+    g_srv.hook_sigint = (rv >= 0) ? (int)rv : 1;
 
     rv = get_obj_attr_int(server, "allow_keepalive");
     g_srv.allow_keepalive = (rv == 0) ? 0 : 1;
