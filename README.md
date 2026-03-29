@@ -2,6 +2,7 @@
 
 --------------------------------------------------------------------
 [![Pypi](https://img.shields.io/pypi/v/fastpysgi.svg?style=flat)](https://pypi.python.org/pypi/fastpysgi)
+[![Python 3.8-3.14](https://img.shields.io/badge/python-3.8%20%7C%203.14-blue?style=flat)](https://pypi.python.org/pypi/fastpysgi)
 
 
 # FastPySGI
