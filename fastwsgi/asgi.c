@@ -709,7 +709,14 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     hr = 0;
 //fin:
     if (client) {
+        // Clear asgi first so that pipeline_cb (which checks client->asgi) can
+        // proceed to the next pipelined request on the next idle worker tick.
         client->asgi = NULL;
+        // stream_read_start() has internal guards:
+        //   - returns -1 if write_req is still active (write_cb will handle restart)
+        //   - returns -2 if pipeline is active (idle_worker_cb -> pipeline_cb will handle it,
+        //     and now that client->asgi is NULL, pipeline_cb will no longer block)
+        // In both cases the connection will be correctly resumed by the appropriate callback.
         stream_read_start(client);
     }
     Py_XDECREF(res);
