@@ -57,12 +57,6 @@ int stream_read_stop(client_t * client)
     return 0;
 }
 
-typedef enum {
-    CA_OK           = 0,  // continue read from socket
-    CA_CLOSE        = 1,
-    CA_SHUTDOWN     = 2
-} client_action_t;
-
 void close_cb(uv_handle_t * handle)
 {
     client_t * client = (client_t *)handle;
@@ -129,20 +123,23 @@ void x_write_cb(uv_write_t * req, int status)
 
 int x_send_status(client_t * client, int status)
 {
-    size_t buf_size = sizeof(x_write_req_t) + 640;
-    x_write_req_t * wreq = (x_write_req_t *)malloc(buf_size);
-    wreq->client = client;
     const char * status_name = get_http_status_name(status);
     if (!status_name)
         status_name = "_unknown_";
-    char * buf = wreq->data;
+
+    char hdr_buf[256];
     int len = 0;
-    len += sprintf(buf + len, "HTTP/1.1 %d %s\r\n", status, status_name);
-    //len += sprintf(buf + len, "Content-Length: 0\r\n");
-    len += sprintf(buf + len, "\r\n");
+    len += sprintf(hdr_buf + len, "HTTP/1.1 %d %s\r\n", status, status_name);
+    //len += sprintf(hdr_buf + len, "Content-Length: 0\r\n");
+    len += sprintf(hdr_buf + len, "\r\n");
+
+    size_t buf_size = sizeof(x_write_req_t) + len + 16;
+    x_write_req_t * wreq = (x_write_req_t *)malloc(buf_size);
+    wreq->client = client;
+    memcpy(wreq->data, hdr_buf, len);
     wreq->buf.len = len;
-    wreq->buf.base = buf;
-    LOGi("%s: \"%s\"", __func__, buf);
+    wreq->buf.base = wreq->data;
+    LOGi("%s: \"%s\"", __func__, wreq->data);
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
     g_srv.num_writes++;
     return 0;

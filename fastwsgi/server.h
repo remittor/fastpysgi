@@ -80,6 +80,12 @@ typedef enum {
     LS_OK              = 6   // request loaded fully
 } load_state_t;
 
+typedef enum {
+    CA_OK           = 0,  // continue read from socket
+    CA_CLOSE        = 1,
+    CA_SHUTDOWN     = 2
+} client_action_t;
+
 typedef struct {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * srv;
