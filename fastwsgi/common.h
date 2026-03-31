@@ -25,8 +25,10 @@
 #define _max(a,b) (((a) > (b)) ? (a) : (b))
 #define _min(a,b) (((a) < (b)) ? (a) : (b))
 
-#define FIN_IF(_cond_,_code_) do { if ((_cond_)) { hr = _code_; goto fin; } } while(0)
-#define FIN(_code_)           do { hr = _code_; goto fin; } while(0)
+#define FIN(_code_)           do { hr = (_code_); goto fin; } while(0)
+#define FIN_IF(_cond_,_code_) do { if ((_cond_)) { hr = (_code_); goto fin; } } while(0)
+#define FIN_if(_cond_, _code_, ...) do { if ((_cond_)) { __VA_ARGS__; hr = (_code_); goto fin; } } while(0)
+#define FIN_NOP ((void)0)
 
 typedef union {
     struct sockaddr_storage storage;
