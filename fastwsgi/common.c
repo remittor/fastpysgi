@@ -75,6 +75,54 @@ const char * get_obj_attr_str(PyObject * obj, const char * name)
     return res;
 }
 
+int get_obj_attr_list_tup(PyObject * obj, const char * name, int idx, PyObject ** buf, int bufsize)
+{
+    int hr = -1;
+    PyObject * list = PyObject_GetAttrString(obj, name);
+    FIN_IF(!list, -1);
+    FIN_IF(!PyList_Check(list), -2);
+    int size = (int)PyList_GET_SIZE(list);
+    FIN_IF(size < 1, -3);
+    FIN_IF(idx < 0, size);    // only return lenght of list
+    FIN_IF(idx >= size, -4);  // incorrect idx
+    PyObject * tup = PyList_GET_ITEM(list, idx);
+    FIN_IF(!tup, -5);
+    FIN_IF(!PyTuple_Check(tup), -6);
+    size = (int)PyTuple_GET_SIZE(tup);
+    FIN_IF(size <= 0, -7);
+    FIN_IF(bufsize <= 0, -8);
+    FIN_IF(!buf, -9);
+    hr = 0;
+    for (idx = 0; idx < bufsize; idx++) {
+        buf[idx] = NULL;
+        if (idx < size) {
+            buf[idx] = PyTuple_GET_ITEM(tup, idx);
+            hr++;
+        }
+    }
+fin:
+    Py_XDECREF(list);
+    return hr;
+}
+
+int get_obj_attr_bindlist(PyObject * obj, const char * name, int idx, const char ** host, int * port)
+{
+    int hr = -1;
+    PyObject * buf[2];
+    int size = get_obj_attr_list_tup(obj, name, -1, NULL, 0);
+    FIN_IF(size < 1, -3);
+    FIN_IF(idx < 0, size);
+    *host = NULL;
+    *port = 0;
+    hr = get_obj_attr_list_tup(obj, name, idx, buf, COUNTOF(buf));
+    if (hr >= COUNTOF(buf)) {
+        *host = (buf[0] == NULL) ? NULL :   PyUnicode_AsUTF8(buf[0]);
+        *port = (buf[1] == NULL) ? 0 : (int)PyLong_AsSsize_t(buf[1]);
+    }
+fin:
+    return hr;
+}
+
 static const char weekDays[7][4] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 static const char monthList[12][4] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 

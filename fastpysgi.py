@@ -19,8 +19,9 @@ LL_TRACE       = 8
 class _Server():
     def __init__(self):
         self.app = None
-        self.host = "0.0.0.0"
-        self.port = 5000
+        self.def_host = "0.0.0.0"
+        self.def_port = 5000
+        self.bindlist = [ ( self.def_host, self.def_port ) ]
         self.backlog = 2048
         self.loglevel = LL_ERROR
         self.hook_sigint = 1            # 0 = ignore Ctrl-C; 1 = stop server on Ctrl-C; 2 = halt process on Ctrl-C
@@ -50,8 +51,16 @@ class _Server():
     def init(self, app, host = None, port = None, loglevel = None, workers = None):
         self.check_version()
         self.app = app
-        self.host = host if host else self.host
-        self.port = port if port else self.port
+        if isinstance(host, list):
+            if len(host) < 1:
+                raise Exception("Incorrect host/port arguments!")
+            self.bindlist = [ ]
+            for bind in host:
+                self.bindlist.append( ( bind[0], bind[1] ) )
+        elif isinstance(host, str) or isinstance(port, int):
+            self.bindlist = [ ( host if host else self.def_host, port if port > 0 else self.def_port ) ]
+        else:
+            raise Exception("Incorrect host/port arguments!")
         self.loglevel = loglevel if loglevel is not None else self.loglevel
         self.num_workers = workers if workers is not None else self.num_workers
         if self.num_workers > 1:
@@ -99,6 +108,12 @@ class _Server():
             for worker in self.worker_list:
                 os.kill(worker, signal.SIGINT)
         return 0
+    
+    def get_bind_addr(self, idx = 0):
+        proto = 'http'
+        host = self.bindlist[idx][0]
+        port = self.bindlist[idx][1]
+        return f'{proto}://{host}:{port}'
 
 server = _Server()
 
@@ -149,14 +164,14 @@ def run_from_cli():
     parser.add_argument(
         "--host",
         type=str,
-        default=server.host,
-        help=f"Host the socket is bound to (default: {server.host})",
+        default=server.def_host,
+        help=f"Host the socket is bound to (default: {server.def_host})",
     )
     parser.add_argument(
         "-p", "--port",
         type=int,
-        default=server.port,
-        help=f"Port the socket is bound to (default: {server.port})",
+        default=server.def_port,
+        help=f"Port the socket is bound to (default: {server.def_port})",
     )
     parser.add_argument(
         "-l", "--loglevel",
@@ -174,7 +189,7 @@ def run_from_cli():
         sys.exit(1)
 
     server.init(app, args.host, args.port, args.loglevel)
-    print(f"FastPySGI server listening at http://{server.host}:{server.port}")
+    print(f"FastPySGI server listening at", server.get_bind_addr())
     server.run()
 
 # -------------------------------------------------------------------------------------
@@ -188,6 +203,6 @@ def run(app = None, host = None, port = None, loglevel = None, workers = None, w
         raise Exception("app not specify.")
     server.init(app, host, port, loglevel, workers)
     addon = " multiple workers" if server.num_workers > 1 else ""
-    print(f"FastPySGI server{addon} listening at http://{server.host}:{server.port}")
+    print(f"FastPySGI server{addon} listening at", server.get_bind_addr())
     print(f"FastPySGI server running on PID: {os.getpid()}")
     server.run()

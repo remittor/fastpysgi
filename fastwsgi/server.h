@@ -21,22 +21,28 @@ enum {
     MAX_read_buffer_size = 4 * 1024 * 1024
 };
 
+#define HTTP_SERVERS_MAX  (4)
 
-typedef struct {
-    uv_tcp_t server;  // Placement strictly at the beginning of the structure!
-    PyObject * pysrv; // object fastpysgi.py@_Server
+typedef struct server {
+    uv_tcp_t server;   // Placement strictly at the beginning of the structure!
+    struct srv * srv;  // pointer to global srv_t object (g_srv)
+    int ipv6;
+    char host[64];
+    int port;
+    PyObject * def_env;   // default environ dict for WSGI
+    PyObject * def_scope; // default scope dict for ASGI
+} server_t;
+
+struct srv {
     uv_loop_t* loop;
+    PyObject * pysrv;  // object fastpysgi.py@_Server
     int num_loop_cb;   // the number of callbacks that were called in one loop cycle
     int num_writes;    // the number of write operations
     uv_idle_t worker;  // worker for HTTP pipelining
     int num_pipeline;  // number of active pipelines
-    uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
     PyObject* asgi_app;
-    int ipv6;
-    char host[64];
-    int port;
     int backlog;
     int hook_sigint;   // 0 - ignore SIGINT, 1 - handle SIGINT, 2 - handle SIGINT with halt prog
     uv_signal_t signal;
@@ -57,7 +63,10 @@ typedef struct {
     } nowait;
     int exit_code;
     asyncio_t aio;
-} server_t;
+    int servers_num;        // number of servers 
+    server_t servers[HTTP_SERVERS_MAX];
+};
+
 
 typedef enum {
     PS_RESTING    = 0,  // pipeline not used
@@ -88,7 +97,7 @@ typedef struct {
 
 struct client {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
-    server_t * srv;
+    server_t * server;
     char remote_addr[64];
     xbuf_t rbuf[2];      // buffers for reading from socket
     struct {
@@ -134,7 +143,7 @@ struct client {
     char buf_read_prealloc[1];
 };
 
-extern server_t g_srv;
+extern srv_t g_srv;
 
 PyObject * get_version(PyObject * self);
 PyObject * init_server(PyObject * self, PyObject * server);
@@ -172,6 +181,12 @@ int build_response(client_t * client, int flags, int status, const void * header
 PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr);
 
 // -----------------------------------------------------------------
+
+inline
+server_t * SERVER(int idx)
+{
+    return (server_t *) &g_srv.servers[idx];
+}
 
 inline
 void before_loop_callback(client_t * client)

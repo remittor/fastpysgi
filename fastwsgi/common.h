@@ -25,6 +25,8 @@
 #define _max(a,b) (((a) > (b)) ? (a) : (b))
 #define _min(a,b) (((a) < (b)) ? (a) : (b))
 
+#define COUNTOF(arr) (sizeof(arr) / sizeof((arr)[0]))
+
 #define FIN(_code_)           do { hr = (_code_); goto fin; } while(0)
 #define FIN_IF(_cond_,_code_) do { if ((_cond_)) { hr = (_code_); goto fin; } } while(0)
 #define FIN_if(_cond_, _code_, ...) do { if ((_cond_)) { __VA_ARGS__; hr = (_code_); goto fin; } } while(0)
@@ -62,6 +64,8 @@ const char * get_http_status_name(int status);
 
 int64_t get_obj_attr_int(PyObject * obj, const char * name);
 const char * get_obj_attr_str(PyObject * obj, const char * name);
+int get_obj_attr_list_tup(PyObject * obj, const char * name, int idx, PyObject ** buf, int bufsize);
+int get_obj_attr_bindlist(PyObject * obj, const char * name, int idx, const char ** host, int * port);
 
 int get_asctime(char ** asc_time);
 
@@ -70,6 +74,7 @@ int get_func_sig_arg_count(PyObject * func);
 bool is_coroutine_function(PyObject * func);
 
 
+typedef struct srv srv_t;
 typedef struct client client_t;
 
 

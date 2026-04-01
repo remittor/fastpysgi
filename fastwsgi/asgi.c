@@ -221,21 +221,22 @@ int aio_loop_shutdown(asyncio_t * _aio)
 
 // -----------------------------------------------------------------------------------
 
-PyObject * g_scope = NULL;
-
 static
 void create_asgi_scope(void)
 {
-    if (!g_scope) {
+    for (int idx = 0; idx < g_srv.servers_num; idx++) {
+        server_t * server = SERVER(idx);
+        if (server->def_scope)
+            continue;
         char buf[32];
-        sprintf(buf, "%d", g_srv.port);
+        sprintf(buf, "%d", server->port);
         PyObject * port = PyUnicode_FromString(buf);
-        PyObject * host = PyUnicode_FromString(g_srv.host);
+        PyObject * host = PyUnicode_FromString(server->host);
         // only constant values!!!
         PyObject * scope_asgi = PyDict_New();
         PyDict_SetItem(scope_asgi, g_cv.version, g_cv.v3_0);
         PyDict_SetItem(scope_asgi, g_cv.spec_version, g_cv.v2_0);
-        g_scope = PyDict_New();
+        PyObject * g_scope = PyDict_New();
         PyDict_SetItem(g_scope, g_cv.type, g_cv.http);
         PyDict_SetItem(g_scope, g_cv.scheme, g_cv.http);
         PyDict_SetItem(g_scope, g_cv.query_string, g_cv.empty_bytes);
@@ -246,6 +247,7 @@ void create_asgi_scope(void)
         //PyDict_SetItem(g_scope, g_cv.SERVER_PORT, port);
         Py_DECREF(port);
         Py_DECREF(host);
+        server->def_scope = g_scope;
     }
 }
 
@@ -258,7 +260,7 @@ int asgi_init(client_t * client)
     FIN_IF(!asgi, -4510001);
     client->asgi = (asgi_t *)asgi;
     create_asgi_scope();
-    client->asgi->scope = PyDict_Copy(g_scope);
+    client->asgi->scope = PyDict_Copy(client->server->def_scope);
     hr = 0;
     LOGt("%s: asgi = %p ", __func__, asgi);
 fin:

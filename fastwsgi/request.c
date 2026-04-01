@@ -5,7 +5,6 @@
 #include "start_response.h"
 #include "pyhacks.h"
 
-PyObject* g_base_dict = NULL;
 
 static
 int set_header(client_t * client, PyObject * key, const char * value, ssize_t length, int flags)
@@ -204,7 +203,7 @@ int on_message_begin(llhttp_t * parser)
         Py_CLEAR(client->request.headers);  // wsgi_input: refcnt 2 -> 1
         // Sets up base request dict for new incoming requests
         // https://www.python.org/dev/peps/pep-3333/#specification-details
-        client->request.headers = PyDict_Copy(g_base_dict);
+        client->request.headers = PyDict_Copy(client->server->def_env);
     }
     client->request.http_content_length = -1; // not specified
     client->request.chunked = 0;
@@ -833,7 +832,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         xbuf_add(head, "\r\n", 2);
     }
 
-    if ((flags & RF_SET_KEEP_ALIVE) != 0 && client->srv->allow_keepalive) {
+    if ((flags & RF_SET_KEEP_ALIVE) != 0 && g_srv.allow_keepalive) {
         xbuf_add_str(head, "Connection: keep-alive\r\n");
     } else {
         xbuf_add_str(head, "Connection: close\r\n");
@@ -1078,27 +1077,30 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
 
 void init_request_dict()
 {
-    if (g_base_dict)
-        return;
-
-    char buf[32];
-    sprintf(buf, "%d", g_srv.port);
-    PyObject * port = PyUnicode_FromString(buf);
-    PyObject * host = PyUnicode_FromString(g_srv.host);
-    // only constant values!!!
-    g_base_dict = PyDict_New();
-    PyDict_SetItem(g_base_dict, g_cv.SCRIPT_NAME, g_cv.empty_string);
-    PyDict_SetItem(g_base_dict, g_cv.SERVER_NAME, host);
-    PyDict_SetItem(g_base_dict, g_cv.SERVER_PORT, port);
-    //PyDict_SetItem(g_base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_version, g_cv.wsgi_ver_1_0);
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_errors, PySys_GetObject("stderr"));
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_run_once, Py_False);
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_multithread, Py_False);
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_multiprocess, Py_True);
-    Py_DECREF(port);
-    Py_DECREF(host);
+    for (int idx = 0; idx < g_srv.servers_num; idx++) {
+        server_t * server = SERVER(idx);
+        if (server->def_env)
+            continue;
+        char buf[32];
+        sprintf(buf, "%d", server->port);
+        PyObject * port = PyUnicode_FromString(buf);
+        PyObject * host = PyUnicode_FromString(server->host);
+        // only constant values!!!
+        PyObject * env = PyDict_New();
+        PyDict_SetItem(env, g_cv.SCRIPT_NAME, g_cv.empty_string);
+        PyDict_SetItem(env, g_cv.SERVER_NAME, host);
+        PyDict_SetItem(env, g_cv.SERVER_PORT, port);
+        //PyDict_SetItem(env, g_cv.wsgi_input, io_BytesIO);   // not const!!!
+        PyDict_SetItem(env, g_cv.wsgi_version, g_cv.wsgi_ver_1_0);
+        PyDict_SetItem(env, g_cv.wsgi_url_scheme, g_cv.http_scheme);
+        PyDict_SetItem(env, g_cv.wsgi_errors, PySys_GetObject("stderr"));
+        PyDict_SetItem(env, g_cv.wsgi_run_once, Py_False);
+        PyDict_SetItem(env, g_cv.wsgi_multithread, Py_False);
+        PyDict_SetItem(env, g_cv.wsgi_multiprocess, Py_True);
+        Py_DECREF(port);
+        Py_DECREF(host);
+        server->def_env = env;
+    }
 }
 
 void configure_parser_settings(llhttp_settings_t * ps)

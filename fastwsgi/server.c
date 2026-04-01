@@ -10,7 +10,7 @@
 #include "request.h"
 #include "constants.h"
 
-server_t g_srv;
+srv_t g_srv;
 static int g_srv_inited = 0;
 
 #define MAGIC_CLIENT ((void *)0xFFAB4321)
@@ -218,7 +218,7 @@ fin:
     if (status < 0) {
         close_conn = 1;
     }
-    if (!client->request.keep_alive || !client->srv->allow_keepalive) {
+    if (!client->request.keep_alive || !g_srv.allow_keepalive) {
         close_conn = 1;
     }
     if (client->asgi) {
@@ -329,7 +329,7 @@ int send_error(client_t * client, int status, const char* error_string)
         build_response(client, flags, status, NULL, error_string, body_size);
         stream_write(client);
     }
-    if (client->request.keep_alive && client->srv->allow_keepalive)
+    if (client->request.keep_alive && g_srv.allow_keepalive)
         return CA_OK;
     
     return CA_SHUTDOWN;
@@ -622,7 +622,7 @@ void connection_cb(uv_stream_t * server, int status)
     }
     LOGi("new connection =================================");
     client_t* client = calloc(1, sizeof(client_t) + g_srv.read_buffer_size + 8);
-    client->srv = &g_srv;
+    client->server = (server_t *)server;
 
     uv_tcp_init(g_srv.loop, &client->handle);
     
@@ -703,40 +703,34 @@ int init_srv(PyObject * aio_loop)
         hr = asyncio_init(&g_srv.aio, aio_loop);
         FIN_IF(hr, hr);
     }
-
-    sockaddr_t addr;
-    int tcp_flags = 0;
-    if (g_srv.ipv6) {
-        tcp_flags = AF_INET6;
-        uv_ip6_addr(g_srv.host, g_srv.port, &addr.in6);
-    } else {
-        tcp_flags = AF_INET;
-        uv_ip4_addr(g_srv.host, g_srv.port, &addr.in4);
-    }
-    uv_tcp_init_ex(g_srv.loop, &g_srv.server, tcp_flags);
-
-    uv_fileno((const uv_handle_t*)&g_srv.server, &g_srv.file_descriptor);
-
-    int enabled = 1;
+    for (int idx = 0; idx < g_srv.servers_num; idx++) {
+        server_t * server = SERVER(idx);
+        sockaddr_t addr;
+        int tcp_flags = 0;
+        if (server->ipv6) {
+            tcp_flags = AF_INET6;
+            uv_ip6_addr(server->host, server->port, &addr.in6);
+        } else {
+            tcp_flags = AF_INET;
+            uv_ip4_addr(server->host, server->port, &addr.in4);
+        }
+        uv_tcp_init_ex(g_srv.loop, (uv_tcp_t *)server, tcp_flags);
+        int enabled = 1;
 #ifdef _WIN32
-    //uv__socket_sockopt((uv_handle_t*)&g_srv.server, SO_REUSEADDR, &enabled);
+        //uv__socket_sockopt((uv_handle_t*)server, SO_REUSEADDR, &enabled);
 #else
-    int so_reuseport = 15;  // SO_REUSEPORT
-    uv__socket_sockopt((uv_handle_t*)&g_srv.server, so_reuseport, &enabled);
+        int so_reuseport = 15;  // SO_REUSEPORT
+        uv__socket_sockopt((uv_handle_t*)server, so_reuseport, &enabled);
 #endif
-
-    int err = uv_tcp_bind(&g_srv.server, &addr.addr, 0);
-    if (err) {
-        LOGe("Bind error %s\n", uv_strerror(err));
-        hr = -5;
-        goto fin;
+        int err = uv_tcp_bind((uv_tcp_t *)server, &addr.addr, 0);
+        LOGe_IF(err, "Bind error %s", uv_strerror(err));
+        FIN_IF(err, -9);
     }
-    err = uv_listen((uv_stream_t*)&g_srv.server, g_srv.backlog, connection_cb);
-    if (err) {
-        LOGe("Listen error %s\n", uv_strerror(err));
-        hr = -6;
-        goto fin;
-    }    
+    for (int idx = 0; idx < g_srv.servers_num; idx++) {
+        int err = uv_listen((uv_stream_t*)SERVER(idx), g_srv.backlog, connection_cb);
+        LOGe_IF(err, "Listen error %s", uv_strerror(err));
+        FIN_IF(err, -10);
+    }
     if (g_srv.hook_sigint > 0) {
         uv_signal_init(g_srv.loop, &g_srv.signal);
         uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
@@ -757,9 +751,11 @@ fin:
             uv_idle_stop(&g_srv.worker);
             uv_close((uv_handle_t *)&g_srv.worker, NULL);
         }
-        if (hr <= -5)
-            uv_close((uv_handle_t *)&g_srv, NULL);
-
+        if (hr <= -9 && hr >= -90) {
+            for (int idx = 0; idx < g_srv.servers_num; idx++) {
+                uv_close((uv_handle_t *)SERVER(idx), NULL);
+            }
+        }
         if (g_srv.loop)
             uv_loop_close(g_srv.loop);
 
@@ -816,20 +812,29 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         g_srv.aio.lifespan.fail_on_startup_error = (rv == 1) ? 1 : 0;
     }
 
-    const char * host = get_obj_attr_str(server, "host");
-    if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {
-        PyErr_Format(PyExc_ValueError, "Option host not defined");
+    int servers_num = get_obj_attr_bindlist(server, "bindlist", -1, NULL, NULL);
+    if (servers_num < 1) {
+        PyErr_Format(PyExc_ValueError, "Option bindlist not defined");
         return PyLong_FromLong(-1012);
     }
-    strcpy(g_srv.host, host);
-    g_srv.ipv6 = (strchr(host, ':') == NULL) ? 0 : 1;
-
-    int64_t port = get_obj_attr_int(server, "port");
-    if (port == LLONG_MIN) {
-        PyErr_Format(PyExc_ValueError, "Option port not defined");
-        return PyLong_FromLong(-1013);
+    if (servers_num > HTTP_SERVERS_MAX) {
+        PyErr_Format(PyExc_ValueError, "Option bindlist contains too many items");
+        return PyLong_FromLong(-1012);
     }
-    g_srv.port = (int)port;
+    for (int idx = 0; idx < servers_num; idx++) {
+        const char * host = NULL;
+        int port = 0;
+        int rc = get_obj_attr_bindlist(server, "bindlist", idx, &host, &port);
+        if (rc <= 0) {
+            PyErr_Format(PyExc_ValueError, "Option bindlist[%d] => incorrect (err = %d)", idx, rc);
+            return PyLong_FromLong(-1013);
+        }
+        strncpy(g_srv.servers[idx].host, host, sizeof(g_srv.servers[idx].host) - 1);
+        g_srv.servers[idx].ipv6 = (strchr(host, ':') == NULL) ? 0 : 1;
+        g_srv.servers[idx].port = port;
+        g_srv.servers[idx].srv = &g_srv;
+    }
+    g_srv.servers_num = servers_num;
 
     int64_t backlog = get_obj_attr_int(server, "backlog");
     if (backlog == LLONG_MIN) {
@@ -898,11 +903,13 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         memset(&g_srv, 0, sizeof(g_srv));
     } else {
         const char * ver = (strlen(FASTPYSGI_VERSION) == 0) ? "<unknown>" : FASTPYSGI_VERSION;
+        const char * host = g_srv.servers[0].host;
+        int port          = g_srv.servers[0].port;
         const char * app = (g_srv.asgi_app) ? "ASGI" : "WSGI";
         int saved_level = g_log_level;
         set_log_level(LL_INFO);
         LOGi("version: %s, host: \"%s\", port: %d, app: %s, hook_sigint: %d, nowait.mode: %d, loglevel: %d",
-            ver, g_srv.host, g_srv.port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
+            ver, host, port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
         set_log_level(saved_level);
     }
     return PyLong_FromLong(hr);
