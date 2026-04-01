@@ -92,13 +92,13 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
 
     if (!aio_loop) {
         set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
-        FIN_IF(!set_event_loop, 4500017);
+        FIN_IF(!set_event_loop, -4500017);
         new_event_loop = PyObject_GetAttrString(aio->asyncio, "new_event_loop");
-        FIN_IF(!new_event_loop, 4500018);
+        FIN_IF(!new_event_loop, -4500018);
         aio->loop.self = PyObject_CallObject(new_event_loop, NULL);
-        FIN_IF(!aio->loop.self, 4500020);
+        FIN_IF(!aio->loop.self, -4500020);
         res = PyObject_CallFunctionObjArgs(set_event_loop, aio->loop.self, NULL);
-        FIN_IF(!res, 4500021);
+        FIN_IF(!res, -4500021);
     } else {
         aio->loop.self = aio_loop;
         Py_INCREF(aio->loop.self);
