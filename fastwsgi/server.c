@@ -25,16 +25,14 @@ int pipeline_close(client_t * client, bool start_reading);
 
 void free_read_buffer(client_t * client, void * data)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
-        xbuf_t * r_buf = &client->rbuf[i];
-        if (data && r_buf->data == data) {
-            //LOGi("%s: free buffer = %p", __func__, data);
-            r_buf->size = 0;  // free buffer
-            return;
-        }
-        if (!data) {
-            xbuf_free(r_buf);
-        }
+    xbuf_t * rbuf = &client->rbuf;
+    if (data && rbuf->data == data) {
+        //LOGi("%s: free buffer = %p", __func__, data);
+        rbuf->size = 0;  // free buffer
+        return;
+    }
+    if (!data) {
+        xbuf_free(rbuf);
     }
 }
 
@@ -572,44 +570,16 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
         LOGc("%s: __undefined_behavior__ PIPELINE is active", __func__);
         return;
     }
-    int buf_prealloc = 0;
-    xbuf_t * rb = NULL;
-    for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
-        xbuf_t * r_buf = &client->rbuf[i];
-        if (r_buf->data == client->buf_read_prealloc)
-            buf_prealloc = 1;  // already used
-
-        if (r_buf->size > 0)
-            continue;  // buffer used!
-
-        if (r_buf->capacity >= read_buffer_size) {
-            // vacant preallocated buffer
-            r_buf->size = read_buffer_size;  // set used flag
-            buf->len = read_buffer_size;
-            buf->base = r_buf->data;
-            buf->base[0] = 0;
-            //LOGi("%s: get preallocated buf %p", __func__, buf->base);
-            return;
-        }
-        if (!rb && r_buf->capacity == 0)
-            rb = r_buf;
+    xbuf_t * rbuf = &client->rbuf;
+    if (!rbuf->data) {
+        int err = xbuf_init2(rbuf, client->buf_read_prealloc, read_buffer_size + 3);
+        if (err)
+            return;  // error
+        LOGd("%s: alloc new buffer %p (cap = %d) PREALLOC", __func__, rbuf->data, (int)rbuf->capacity);
     }
-    if (!rb)  // all read buffers used!
-        return;  // error
-
-    int err = 0;
-    if (buf_prealloc == 0) {
-        err = xbuf_init2(rb, client->buf_read_prealloc, read_buffer_size + 3);
-    } else {
-        err = xbuf_init(rb, NULL, read_buffer_size + 1);
-    }
-    if (err)
-        return;  // error
-
     buf->len = read_buffer_size;
-    buf->base = rb->data;
+    buf->base = rbuf->data;
     buf->base[0] = 0;
-    LOGd("%s: alloc new buffer %p (size = %d)", __func__, buf->base, (int)buf->len);
 }
 
 void connection_cb(uv_stream_t * server, int status)

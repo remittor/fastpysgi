@@ -99,7 +99,7 @@ struct client {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * server;
     char remote_addr[64];
-    xbuf_t rbuf[2];      // buffers for reading from socket
+    xbuf_t rbuf;             // buffer for reading from socket
     struct {
         pl_status_t status;  // pipeline status
         char * buf_base;     // master buffer with pipeline-requests
