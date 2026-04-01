@@ -23,12 +23,6 @@ enum {
 
 
 typedef struct {
-    uv_write_t req;  // Placement strictly at the beginning of the structure!
-    void * client;   // NULL = not sending
-    uv_buf_t bufs[max_preloaded_body_chunks + 3];
-} write_req_t;
-
-typedef struct {
     uv_tcp_t server;  // Placement strictly at the beginning of the structure!
     PyObject * pysrv; // object fastpysgi.py@_Server
     uv_loop_t* loop;
@@ -87,6 +81,12 @@ typedef enum {
 } client_action_t;
 
 typedef struct {
+    uv_write_t req;     // Placement strictly at the beginning of the structure!
+    client_t * client;  // if NULL => not sending
+    uv_buf_t   bufs[max_preloaded_body_chunks + 3];
+} write_req_t;
+
+struct client {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * srv;
     char remote_addr[64];
@@ -132,7 +132,7 @@ typedef struct {
     // preallocated buffers
     char buf_head_prealloc[2*1024];
     char buf_read_prealloc[1];
-} client_t;
+};
 
 extern server_t g_srv;
 
@@ -173,14 +173,15 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr);
 
 // -----------------------------------------------------------------
 
-inline void before_loop_callback(void * _client)
+inline
+void before_loop_callback(client_t * client)
 {
     g_srv.num_loop_cb++;
 }
 
-inline void update_log_prefix(void * _client)
+inline
+void update_log_prefix(client_t * client)
 {
-    client_t * client = (client_t *)_client;
     set_log_client_addr(client ? client->remote_addr : NULL);
 }
 

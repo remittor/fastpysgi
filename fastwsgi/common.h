@@ -70,6 +70,9 @@ int get_func_sig_arg_count(PyObject * func);
 bool is_coroutine_function(PyObject * func);
 
 
+typedef struct client client_t;
+
+
 static
 INLINE
 bool is_stream_notconn(uv_stream_t * handle)

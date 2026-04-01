@@ -42,7 +42,7 @@ int aio_loop_shutdown(asyncio_t * aio);
 
 typedef struct {
     PyObject   ob_base;
-    void     * client;
+    client_t * client;
     PyObject * task;   // task for coroutine
     PyObject * scope;  // PyDict
     struct {
@@ -62,7 +62,7 @@ typedef struct {
 extern PyTypeObject ASGI_Type;
 
 INLINE
-PyObject * create_asgi(void * client)
+PyObject * create_asgi(client_t * client)
 {
     asgi_t * asgi = PyObject_New(asgi_t, &ASGI_Type);
     if (asgi) {
@@ -75,12 +75,12 @@ PyObject * create_asgi(void * client)
 
 
 bool asgi_app_check(PyObject * app);
-int  asgi_init(void * client);
-int  asgi_free(void * client);
-int  asgi_call_app(void * _client);
+int  asgi_init(client_t * client);
+int  asgi_free(client_t * client);
+int  asgi_call_app(client_t * client);
 
-int  asgi_future_set_result(void * client, PyObject ** ptr_future, PyObject * result);
-int  asgi_future_set_exception(void * _client, PyObject ** ptr_future, const char * fmt, ...);
+int  asgi_future_set_result(client_t * client, PyObject ** ptr_future, PyObject * result);
+int  asgi_future_set_exception(client_t * client, PyObject ** ptr_future, const char * fmt, ...);
 
 
 static

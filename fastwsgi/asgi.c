@@ -249,10 +249,9 @@ void create_asgi_scope(void)
     }
 }
 
-int asgi_init(void * _client)
+int asgi_init(client_t * client)
 {
     int hr = 0;
-    client_t * client = (client_t *)_client;
     FIN_IF(!g_srv.asgi_app, 0);
     asgi_free(client);
     PyObject * asgi = create_asgi(client);
@@ -266,9 +265,8 @@ fin:
     return hr;
 }
 
-int asgi_free(void * _client)
+int asgi_free(client_t * client)
 {
-    client_t * client = (client_t *)_client;
     asgi_t * asgi = client->asgi;
     if (asgi) {
         asgi->client = NULL;
@@ -279,10 +277,9 @@ int asgi_free(void * _client)
     return 0;
 }
 
-int asgi_call_app(void * _client)
+int asgi_call_app(client_t * client)
 {
     int hr = 0;
-    client_t * client = (client_t *)_client;
     asgi_t * asgi = client->asgi;
     PyObject * coroutine = NULL;
     PyObject * task = NULL;
@@ -395,10 +392,9 @@ fin:
 
 // -----------------------------------------------------------------------------------
 
-int asgi_future_set_result_soon(void * _client, PyObject * future, PyObject * result)
+int asgi_future_set_result_soon(client_t * client, PyObject * future, PyObject * result)
 {
     int hr = 0;
-    client_t * client = (client_t *)_client;
     PyObject * set_result = NULL;
     PyObject * ret = NULL;
 
@@ -417,10 +413,9 @@ fin:
     return hr;
 }
 
-int asgi_future_set_result(void * _client, PyObject ** ptr_future, PyObject * result)
+int asgi_future_set_result(client_t * client, PyObject ** ptr_future, PyObject * result)
 {
     int hr = 0;
-    client_t * client = (client_t *)_client;
     PyObject * future = NULL;
     PyObject * done = NULL;
     PyObject * ret = NULL;
@@ -446,12 +441,11 @@ fin:
     return hr;
 }
 
-int asgi_future_set_exception(void * _client, PyObject ** ptr_future, const char * fmt, ...)
+int asgi_future_set_exception(client_t * client, PyObject ** ptr_future, const char * fmt, ...)
 {
     int hr = 0;
     char text[1024];
     va_list args;
-    client_t * client = (client_t *)_client;
     PyObject * future = NULL;
     PyObject * exc_text = NULL;
     PyObject * exception = NULL;

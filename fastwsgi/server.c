@@ -110,9 +110,9 @@ void shutdown_connection(client_t * client)
 
 typedef struct {
     uv_write_t req;
-    uv_buf_t buf;
-    void * client;
-    char data[1];
+    uv_buf_t   buf;
+    client_t * client;
+    char       data[1];
 } x_write_req_t;
 
 void x_write_cb(uv_write_t * req, int status)
