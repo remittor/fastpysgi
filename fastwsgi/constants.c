@@ -80,8 +80,8 @@ void init_constants()
     g_cv.http_request = PyUnicode_FromString("http.request");
     g_cv.status = PyUnicode_FromString("status");
 
-    g_cv.ContentLength = PyBytes_FromString("Content-Length");
-    g_cv.TransferEncoding = PyBytes_FromString("Transfer-Encoding");
+    g_cv.content_length = PyBytes_FromString("content-length");
+    g_cv.transfer_encoding = PyBytes_FromString("transfer-encoding");
 
     g_cv.__call__ = PyUnicode_FromString("__call__");
     g_cv.add_done_callback = PyUnicode_FromString("add_done_callback");

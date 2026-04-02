@@ -75,8 +75,8 @@ typedef struct {
     PyObject* http_request;  // "http.request"
     PyObject* status;  // "status"
 
-    PyObject* ContentLength;  // bytes "Content-Length"
-    PyObject* TransferEncoding;  // bytes "Transfer-Encoding"
+    PyObject* content_length;  // bytes "content-length"
+    PyObject* transfer_encoding;  // bytes "transfer-encoding"
 
     PyObject* __call__;  // "__call__"
     PyObject* add_done_callback;  // "add_done_callback"

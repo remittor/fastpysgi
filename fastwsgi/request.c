@@ -61,7 +61,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
         if (!kname) {
             // only for "scope.headers"
             if (key == g_cv.CONTENT_LENGTH) {
-                key = g_cv.ContentLength;
+                key = g_cv.content_length;
             }
             PyObject * scope_headers = PyDict_GetItem(scope, g_cv.headers);
             if (!scope_headers) {
