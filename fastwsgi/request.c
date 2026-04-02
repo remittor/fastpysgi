@@ -7,6 +7,30 @@
 
 
 static
+INLINE
+int xbuf_add_HDR(xbuf_t * buf, const void * data, Py_ssize_t size)
+{
+    int beg = buf->size;
+    if (size <= 0) {
+        return beg;
+    }
+    int end = xbuf_add(buf, data, (size_t)size);
+    if (g_srv.resp_hdr_lower && end > beg) {
+        for (int pos = beg; pos < end; pos++) {
+            buf->data[pos] = ASCII_TO_LOWER(buf->data[pos]);
+        }
+    }
+    return end;
+}
+
+static
+INLINE
+int xbuf_add_hdr(xbuf_t * buf, const char * str)
+{
+    return xbuf_add_HDR(buf, str, strlen(str));
+}
+
+static
 int set_header(client_t * client, PyObject * key, const char * value, ssize_t length, int flags)
 {
     int hr = 0;
@@ -289,14 +313,22 @@ int on_header_field_complete(llhttp_t * parser)
             client->request.current_val_len = 0;
             return 0;  // skip incorrect header
         }
-        if (client->asgi || (unsigned char)symbol >= 127) {
+        if ((unsigned char)symbol >= 127) {
             continue;
         }
-        if (symbol == '-') {
-            data[i] = '_';
-            continue;
+        if (client->asgi) {
+            // ASGI
+            if (g_srv.aio.req_hdr_lower) {
+                data[i] = ASCII_TO_LOWER(symbol);
+            }
+        } else {
+            // WSGI
+            if (symbol == '-') {
+                data[i] = '_';
+                continue;
+            }
+            data[i] = ASCII_TO_UPPER(symbol);
         }
-        data[i] = toupper(symbol);
     }
 fin:
     xbuf_add(buf, "\0", 1);  // add empty value
@@ -800,7 +832,7 @@ int build_response(client_t * client, int flags, int status, const void * header
                     resp_server_present = true;
                 }
 
-            xbuf_add(head, key, key_len);
+            xbuf_add_HDR(head, key, key_len);
             xbuf_add(head, ": ", 2);
             if (is_header_server && g_srv.add_header_server > 0) {
                 xbuf_add(head, g_srv.header_server, g_srv.add_header_server);
@@ -822,20 +854,20 @@ int build_response(client_t * client, int flags, int status, const void * header
     if (!resp_date_present && g_srv.add_header_date) {
         char * date_str;
         int date_len = get_asctime(&date_str);
-        xbuf_add(head, "Date: ", 6);
+        xbuf_add_HDR(head, "Date: ", 6);
         xbuf_add(head, date_str, date_len);
         xbuf_add(head, "\r\n", 2);
     }
     if (!resp_server_present && g_srv.add_header_server > 0) {
-        xbuf_add(head, "Server: ", 8);
+        xbuf_add_HDR(head, "Server: ", 8);
         xbuf_add(head, g_srv.header_server, g_srv.add_header_server);
         xbuf_add(head, "\r\n", 2);
     }
 
     if ((flags & RF_SET_KEEP_ALIVE) != 0 && g_srv.allow_keepalive) {
-        xbuf_add_str(head, "Connection: keep-alive\r\n");
+        xbuf_add_hdr(head, "Connection: keep-alive\r\n");
     } else {
-        xbuf_add_str(head, "Connection: close\r\n");
+        xbuf_add_hdr(head, "Connection: close\r\n");
     }
 
     if (client->request.parser.method == HTTP_HEAD) {
@@ -846,7 +878,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
 
     if (client->response.chunked) {
-        xbuf_add_str(head, "Transfer-Encoding: chunked\r\n");
+        xbuf_add_hdr(head, "Transfer-Encoding: chunked\r\n");
         LOGi("Added Header 'Transfer-Encoding: chunked'");
         xbuf_add(head, "\r\n", 2);  // end of headers
         if (client->response.body_preloaded_size >= INT_MAX)
@@ -871,12 +903,13 @@ int build_response(client_t * client, int flags, int status, const void * header
 
 end:
     if (body_size == 0) {
-        xbuf_add_str(head, "Content-Length: 0\r\n");
+        xbuf_add_hdr(head, "Content-Length: 0\r\n");
         LOGi("Added Header 'Content-Length: 0'");
     }
     else if (body_size > 0) {
-        char * buf = xbuf_expand(head, 48);
-        head->size += sprintf(buf, "Content-Length: %lld\r\n", (long long)body_size);
+        char contlen[48]; 
+        int len = snprintf(contlen, sizeof(contlen)-1, "Content-Length: %lld\r\n", (long long)body_size);
+        xbuf_add_HDR(head, contlen, len);
         LOGi("Added Header 'Content-Length: %lld'", (long long)body_size);
     }
     xbuf_add(head, "\r\n", 2);  // end of headers

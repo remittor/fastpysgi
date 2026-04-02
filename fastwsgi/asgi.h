@@ -13,6 +13,7 @@ typedef struct {
     int        periodic_armed;     // 1 = call_later already in aio queue
     int        idle_num;
     int        loop_timeout;  // millisec
+    int        req_hdr_lower;   // 0 = not change case for header names, 1 = force lowercase
     struct {
         int borrowed;
         PyObject * self;

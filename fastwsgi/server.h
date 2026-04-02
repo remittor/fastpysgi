@@ -47,6 +47,7 @@ struct srv {
     int hook_sigint;   // 0 - ignore SIGINT, 1 - handle SIGINT, 2 - handle SIGINT with halt prog
     uv_signal_t signal;
     int allow_keepalive;
+    int resp_hdr_lower;    // 0 = not change case for header names, 1 = force lowercase
     int add_header_date;
     int add_header_server;
     char header_server[80];

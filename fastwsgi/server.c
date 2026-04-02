@@ -870,6 +870,12 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     rv = get_obj_attr_int(server, "allow_keepalive");
     g_srv.allow_keepalive = (rv == 0) ? 0 : 1;
 
+    rv = get_obj_attr_int(server, "resp_hdr_lower");
+    if (rv == LLONG_MIN) {
+        g_srv.resp_hdr_lower = (g_srv.asgi_app) ? 1 : 0;
+    } else {
+        g_srv.resp_hdr_lower = (rv == 0) ? 0 : 1;
+    }
     rv = get_obj_attr_int(server, "add_header_date");
     g_srv.add_header_date = (rv == 0) ? 0 : 1;
 

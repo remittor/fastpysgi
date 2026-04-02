@@ -212,6 +212,9 @@ int asyncio_load_cfg(asyncio_t * aio)
     rv = get_obj_attr_int(g_srv.pysrv, "lifespan_fose");
     aio->lifespan.fail_on_startup_error = (rv == 1) ? 1 : 0;
 
+    rv = get_obj_attr_int(g_srv.pysrv, "req_hdr_lower");
+    aio->req_hdr_lower = (rv == 0) ? 0 : 1;
+
     return 0;
 }
 

@@ -81,6 +81,20 @@ typedef struct client client_t;
 
 static
 INLINE
+char ASCII_TO_LOWER(char symbol)
+{
+    return (symbol >= 'A' && symbol <= 'Z') ? symbol + ('a' - 'A') : symbol;
+}
+
+static
+INLINE
+char ASCII_TO_UPPER(char symbol)
+{
+    return (symbol >= 'a' && symbol <= 'z') ? symbol - ('a' - 'A') : symbol;
+}
+
+static
+INLINE
 bool is_stream_notconn(uv_stream_t * handle)
 {
     if (!(handle->flags & UV_HANDLE_WRITABLE) ||
