@@ -720,7 +720,7 @@ void signal_handler(uv_signal_t * req, int signum)
     }
 }
 
-int init_srv(PyObject * aio_loop)
+int init_srv(void)
 {
     int hr = -1;
     if (g_srv_inited)
@@ -734,7 +734,7 @@ int init_srv(PyObject * aio_loop)
     PyType_Ready(&StartResponse_Type);
     if (g_srv.asgi_app) {
         PyType_Ready(&ASGI_Type);
-        hr = asyncio_init(&g_srv.aio, aio_loop);
+        hr = asyncio_init(&g_srv.aio);
         FIN_IF(hr, hr);
     }
     for (int idx = 0; idx < g_srv.servers_num; idx++) {
@@ -831,21 +831,8 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         g_srv.wsgi_app = app;
     }
     if (g_srv.asgi_app) {
-        PyObject * loop = PyObject_GetAttrString(server, "loop");
-        Py_XDECREF(loop);
-        if (loop && loop != Py_None) {
-            aio_loop = loop;
-        }
-        rv = get_obj_attr_int(server, "loop_timeout");  // 0 = off, 1 = 1ms, 3 = 3ms (default)
-        g_srv.aio.loop_timeout = (rv >= 0 && rv <= 1000) ? (int)rv : 3;
-
-        rv = get_obj_attr_int(server, "lifespan");  // 0 = off, 1 = on, 2 = auto (default)
-        g_srv.aio.lifespan.mode = (rv >= 0 && rv <= 2) ? (int)rv : (int)LS_MODE_AUTO;
-
-        rv = get_obj_attr_int(server, "lifespan_fose");
-        g_srv.aio.lifespan.fail_on_startup_error = (rv == 1) ? 1 : 0;
+        asyncio_load_cfg(&g_srv.aio);
     }
-
     int servers_num = get_obj_attr_bindlist(server, "bindlist", -1, NULL, NULL);
     if (servers_num < 1) {
         PyErr_Format(PyExc_ValueError, "Option bindlist not defined");
@@ -933,7 +920,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     rv = get_obj_attr_int(server, "nowait");
     g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
 
-    int hr = init_srv(aio_loop);
+    int hr = init_srv();
     if (hr) {
         LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);

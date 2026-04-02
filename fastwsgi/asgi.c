@@ -80,7 +80,7 @@ static PyMethodDef uni_loop_periodic_method = {
     "uni_loop_periodic", uni_loop_periodic, METH_NOARGS, ""
 }; 
 
-int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
+int asyncio_init(asyncio_t * aio)
 {
     int hr = 0;
     PyObject * set_event_loop = NULL;
@@ -90,7 +90,13 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
 
+    PyObject * aio_loop = PyObject_GetAttrString(g_srv.pysrv, "loop");
+    Py_XDECREF(aio_loop);
+    if (aio_loop == Py_None) {
+        aio_loop = NULL;
+    }
     if (!aio_loop) {
+        aio->loop.borrowed = 0;
         set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
         FIN_IF(!set_event_loop, -4500017);
         new_event_loop = PyObject_GetAttrString(aio->asyncio, "new_event_loop");
@@ -101,7 +107,7 @@ int asyncio_init(asyncio_t * aio, PyObject * aio_loop)
         FIN_IF(!res, -4500021);
     } else {
         aio->loop.self = aio_loop;
-        Py_INCREF(aio->loop.self);
+        Py_INCREF(aio->loop.self);  // set owner for aio_loop
         aio->loop.borrowed = 1;
         LOGt("%s: loop.borrowed = %d", __func__, aio->loop.borrowed);
     }
@@ -189,6 +195,23 @@ int asyncio_free(asyncio_t * aio, bool free_self)
         if (free_self)
             free(aio);
     }
+    return 0;
+}
+
+// -----------------------------------------------------------------------------------
+
+int asyncio_load_cfg(asyncio_t * aio)
+{
+    int64_t rv;
+    rv = get_obj_attr_int(g_srv.pysrv, "loop_timeout");  // 0 = off, 1 = 1ms, 3 = 3ms (default)
+    aio->loop_timeout = (rv >= 0 && rv <= 1000) ? (int)rv : 3;
+
+    rv = get_obj_attr_int(g_srv.pysrv, "lifespan");  // 0 = off, 1 = on, 2 = auto (default)
+    aio->lifespan.mode = (rv >= 0 && rv <= 2) ? (int)rv : (int)LS_MODE_AUTO;
+
+    rv = get_obj_attr_int(g_srv.pysrv, "lifespan_fose");
+    aio->lifespan.fail_on_startup_error = (rv == 1) ? 1 : 0;
+
     return 0;
 }
 
