@@ -16,22 +16,20 @@ static int g_srv_inited = 0;
 #define MAGIC_CLIENT ((void *)0xFFAB4321)
 
 void alloc_cb(uv_handle_t * handle, size_t suggested_size, uv_buf_t * buf);
-void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf);
+void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf);
 int stream_write(client_t * client);
 
 void idle_worker_cb(uv_idle_t * handle);
 void pipeline_cb(uv_handle_t * handle, void * arg);
 int pipeline_close(client_t * client, bool start_reading);
 
-void free_read_buffer(client_t * client, void * data)
+void free_read_buffer(client_t * client, void * ptr)
 {
     xbuf_t * rbuf = &client->rbuf;
-    if (data && rbuf->data == data) {
-        //LOGi("%s: free buffer = %p", __func__, data);
+    if (ptr) {
+        //LOGi("%s: free buffer = %p", __func__, ptr);
         rbuf->size = 0;  // free buffer
-        return;
-    }
-    if (!data) {
+    } else {
         xbuf_free(rbuf);
     }
 }
@@ -393,33 +391,35 @@ void pipeline_cb(uv_handle_t * handle, void * arg)
     // continue read master buffer
 }
 
-void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
+void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
 {
-    int err = 0;
-    int act = CA_OK;
+    int hr = CA_OK;  // client action
+    int err = 0;     // code of HTTP error
+    uv_buf_t uv_buf;
+    uv_buf_t * buf = &uv_buf;
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
     before_loop_callback(client);
     update_log_prefix(client);
 
+    xbuf_t * rbuf = &client->rbuf;
+    uv_buf.len  = _buf->len;
+    uv_buf.base = _buf->base;
+
     if (nread == 0) {
         LOGd("read_cb: nread = 0");
-        goto fin;
+        FIN(CA_OK);
     }
     if (nread < 0) {
         char err_name[128];
         uv_err_name_r((int)nread, err_name, sizeof(err_name) - 1);
         LOGd("read_cb: nread = %d  error: %s", (int)nread, err_name);
-        if (nread == UV_EOF) {  // remote peer disconnected
-            act = CA_CLOSE;
-            goto fin;
-        }
+        FIN_IF(nread == UV_EOF, CA_CLOSE);  // remote peer disconnected
         LOGe_IF(nread != UV_ECONNRESET, "%s: Read error: %s", __func__, err_name);
-        act = CA_SHUTDOWN;
-        goto fin;
+        FIN(CA_SHUTDOWN);
     }
-
     LOGd("read_cb: [nread = %d]", (int)nread);
+
     if (g_log_level >= LL_TRACE) {
         if ((ssize_t)buf->len > nread)
             buf->base[nread] = 0;
@@ -464,13 +464,13 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     if (error != HPE_OK) {
         const char * err_pos = llhttp_get_error_pos(parser);
         LOGe("Parse error: %s %s\n", llhttp_errno_name(error), client->request.parser.reason);
-        act = send_fatal(client, HTTP_STATUS_BAD_REQUEST, NULL);
+        int act = send_fatal(client, HTTP_STATUS_BAD_REQUEST, NULL);
         err = 0;  // skip call send_error
-        goto fin;
+        FIN(act);
     }
     if (client->request.load_state < LS_MSG_END) {
         if (client->pipeline.status >= PS_ACTIVE) {
-            if (buf->base + nread < client->pipeline.buf_end) {
+            if (buf && buf->base + nread < client->pipeline.buf_end) {
                 LOGc("%s: incorrect PIPELINE chunk", __func__);
                 err = HTTP_STATUS_BAD_REQUEST;
             }
@@ -479,54 +479,54 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
             LOGd("%s: PIPELINE deactivated! (partial)", __func__);
             client->request.parser_locked = true;
             if (err) {            
-                act = send_fatal(client, err, NULL);
+                int act = send_fatal(client, err, NULL);
                 err = 0;  // skip call send_error
-                goto fin;
+                FIN(act);
             }
         }
         if (client->error) {
             err = HTTP_STATUS_BAD_REQUEST;
-            goto fin;
+            FIN(CA_OK);
         }
         LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld",
             (long long)client->request.load_state, (long long)client->request.wsgi_input_size);
         // continue read from socket (or read from PIPELINE master buffer)
-        goto fin;
+        FIN(CA_OK);
     }
     if (client->request.load_state != LS_OK) {
         // error from callback function "on_message_complete"
         if (client->request.expect_continue && client->error == HTTP_STATUS_EXPECTATION_FAILED) {
             client->request.expect_continue = 0;
             err = HTTP_STATUS_EXPECTATION_FAILED;
-            goto fin;
+            FIN(CA_OK);
         }
         err = HTTP_STATUS_BAD_REQUEST;
-        goto fin;
+        FIN(CA_OK);
     }
     LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", (long long)client->request.wsgi_input_size);
     if (client->asgi) {
         err = asgi_call_app(client);
         if (!err)
             stream_read_stop(client);
-        goto fin;
+        FIN(CA_OK);
     }
     err = call_wsgi_app(client);
     if (err) {
-        goto fin;
+        FIN(CA_OK);
     }
     err = process_wsgi_response(client);
     if (err) {
-        goto fin;
+        FIN(CA_OK);
     }
     err = create_response(client);
     if (err) {
-        goto fin;
+        FIN(CA_OK);
     }
     LOGi("Response created! (len = %d+%lld)", client->head.size, (long long)client->response.body_preloaded_size);
-    act = stream_write(client);
+    hr = stream_write(client);
 
 fin:
-    if (buf && buf->base)
+    if (buf)
         free_read_buffer(client, buf->base);
 
     if (PyErr_Occurred()) {
@@ -535,10 +535,10 @@ fin:
         PyErr_Print();
         PyErr_Clear();
     }
-    if (err && act == CA_OK) {
+    if (err && hr == CA_OK) {
         if (err < HTTP_STATUS_BAD_REQUEST)
             err = HTTP_STATUS_BAD_REQUEST;
-        act = send_error(client, err, NULL);
+        hr = send_error(client, err, NULL);
     }
     if (client->request.parser_locked == false) {
         llhttp_reset(&client->request.parser);
@@ -546,12 +546,12 @@ fin:
     if (client->request.load_state >= LS_MSG_END) {
         client->request.load_state = LS_WAIT;
     }
-    if (act == CA_SHUTDOWN) {
+    if (hr == CA_SHUTDOWN) {
         stream_read_stop(client);
         shutdown_connection(client);
         return;
     }
-    if (act == CA_CLOSE) {
+    if (hr == CA_CLOSE) {
         stream_read_stop(client);
         close_connection(client);
         return;
