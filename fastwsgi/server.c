@@ -850,6 +850,9 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
     g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
+    if (rv != LLONG_MIN && rv < 0) {
+        g_srv.read_buffer_size = (size_t)(-rv);  // ONLY FOR TESTING
+    }
 
     rv = get_obj_attr_int(server, "tcp_nodelay");
     g_srv.tcp_nodelay = (rv >= 0) ? (int)rv : 0;

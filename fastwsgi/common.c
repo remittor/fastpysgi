@@ -33,9 +33,9 @@ int64_t get_env_int(const char * name)
     size_t len = sizeof(buf) - 1;
     int rv = uv_os_getenv(name, buf, &len);
     if (rv == UV_ENOENT)
-        return -1;  // env not found
+        return LLONG_MIN;  // env not found
     if (rv != 0 || len == 0)
-        return -2;
+        return LLONG_MIN;
     if (len == 1 && buf[0] == '0')
         return 0;
     if (len > 2 && buf[0] == '0' && buf[1] == 'x') {
@@ -44,7 +44,7 @@ int64_t get_env_int(const char * name)
         v = strtoll(buf, NULL, 10);
     }
     if (v <= 0 || v == LLONG_MAX)
-        return -3;
+        return LLONG_MIN;
     return v;
 }
 
@@ -114,8 +114,8 @@ int get_obj_attr_bindlist(PyObject * obj, const char * name, int idx, const char
     FIN_IF(idx < 0, size);
     *host = NULL;
     *port = 0;
-    hr = get_obj_attr_list_tup(obj, name, idx, buf, COUNTOF(buf));
-    if (hr >= COUNTOF(buf)) {
+    hr = get_obj_attr_list_tup(obj, name, idx, buf, (int)COUNTOF(buf));
+    if (hr >= (int)COUNTOF(buf)) {
         *host = (buf[0] == NULL) ? NULL :   PyUnicode_AsUTF8(buf[0]);
         *port = (buf[1] == NULL) ? 0 : (int)PyLong_AsSsize_t(buf[1]);
     }
