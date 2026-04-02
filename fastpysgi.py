@@ -42,25 +42,33 @@ class _Server():
         self.loop_timeout = 3           # ASGI: timeout for CPU relax (millisec)
         self.lifespan = 2               # ASGI: 0 = off, 1 = on, 2 = auto
         self.lifespan_fose = 0          # ASGI: 0 = log and continue, 1 = server abort (fail_on_startup_error)
-        
+
     def check_version(self):
         so_ver = _fastpysgi.get_version()
         if so_ver != __version__:
             raise Exception(f'Incorrect version of module "_fastpysgi" = {so_ver} (expected: {__version__})')
-    
-    def init(self, app, host = None, port = None, loglevel = None, workers = None):
+
+    def check_bindlist(self):
+        if not self.bindlist:
+            raise Exception("Param bindlist is empty!")
+        if not isinstance(self.bindlist, list) or not all(isinstance(item, tuple) for item in self.bindlist):
+            raise Exception("Param bindlist is incorrect!")
+
+    def check_all(self):
         self.check_version()
+        self.check_bindlist()
+
+    def init(self, app, host = None, port = None, loglevel = None, workers = None):
         self.app = app
         if isinstance(host, list):
-            if len(host) < 1:
-                raise Exception("Incorrect host/port arguments!")
             self.bindlist = [ ]
+            if len(host) < 1 or port is not None:
+                raise Exception("Incorrect host/port arguments!")
             for bind in host:
                 self.bindlist.append( ( bind[0], bind[1] ) )
         elif isinstance(host, str) or isinstance(port, int):
             self.bindlist = [ ( host if host else self.def_host, port if port > 0 else self.def_port ) ]
-        else:
-            raise Exception("Incorrect host/port arguments!")
+        self.check_all()
         self.loglevel = loglevel if loglevel is not None else self.loglevel
         self.num_workers = workers if workers is not None else self.num_workers
         if self.num_workers > 1:
@@ -72,6 +80,7 @@ class _Server():
         _fastpysgi.change_setting(self, "allow_keepalive")
 
     def run(self):
+        self.check_all()
         if self.nowait:
             if self.num_workers > 1:
                 raise Exception('Incorrect server options')
@@ -108,7 +117,7 @@ class _Server():
             for worker in self.worker_list:
                 os.kill(worker, signal.SIGINT)
         return 0
-    
+
     def get_bind_addr(self, idx = 0):
         proto = 'http'
         host = self.bindlist[idx][0]
