@@ -25,6 +25,9 @@ int pipeline_close(client_t * client, bool start_reading);
 
 void free_read_buffer(client_t * client, void * ptr)
 {
+    if (client->reader.status == RXS_ACTIVE) {
+        return;  // dont free when wait reading of useful data
+    }
     xbuf_t * rbuf = &client->rbuf;
     if (ptr) {
         //LOGi("%s: free buffer = %p", __func__, ptr);
@@ -66,6 +69,7 @@ void close_cb(uv_handle_t * handle)
     xbuf_free(&client->head);
     free_start_response(client);
     reset_response_body(client);
+    client->reader.status = RXS_DISABLED;
     free_read_buffer(client, NULL);
     asgi_free(client);
     free(client);
@@ -408,6 +412,9 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
 
     if (nread == 0) {
         LOGd("read_cb: nread = 0");
+        if (client->reader.status == RXS_RESTBEG || client->reader.status == RXS_ACTIVE) {
+            return;  // continue socket reading without any checking
+        }
         FIN(CA_OK);
     }
     if (nread < 0) {
@@ -418,6 +425,15 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         LOGe_IF(nread != UV_ECONNRESET, "%s: Read error: %s", __func__, err_name);
         FIN(CA_SHUTDOWN);
     }
+    if (client->reader.status == RXS_RESTBEG && client->reader.pkt == 0) {
+        client->reader.status = RXS_ACTIVE;
+    }
+    client->reader.pkt += (client->reader.pkt < ULLONG_MAX) ? 1 : 0;
+    if (client->reader.total < ULLONG_MAX - (uint64_t)nread) {
+        client->reader.total += nread;
+    } else {
+        client->reader.total = ULLONG_MAX;
+    }
     LOGd("read_cb: [nread = %d]", (int)nread);
 
     if (g_log_level >= LL_TRACE) {
@@ -425,7 +441,36 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
             buf->base[nread] = 0;
         LOGt(buf->base);
     }
+
+    if ((size_t)rbuf->size + (size_t)nread > g_srv.read_buffer_size) {
+        LOGe("%s: detect malformed request (SIZE = %d + %d)", __func__, rbuf->size, (int)nread);
+        client->reader.status = RXS_FAIL;
+        FIN(CA_SHUTDOWN);
+    }
+    rbuf->size += (int)nread;
     
+    if (client->reader.status == RXS_ACTIVE) {
+        if (rbuf->size != (int)client->reader.total) {
+            LOGc("%s: __undefined_behavior__ RXS_ACTIVE: size = %d, total = %d", __func__, (int)rbuf->size, (int)client->reader.total);
+            FIN(CA_SHUTDOWN);
+        }
+        const char * prn = NULL;
+        prn = find_crlf(rbuf->data, rbuf->size);
+        if (!prn) {
+            if (rbuf->size >= (int)g_srv.read_buffer_size) {
+                LOGe("%s: Detect malformed request (size = %d)", __func__, rbuf->size);
+                client->reader.status = RXS_FAIL;
+                FIN(CA_SHUTDOWN);
+            }
+            return;  // continue socket reading and fill the read buffer (rbuf)
+        }
+        LOGi("%s: reading useful data completed (size = %d) len = %d", __func__, rbuf->size, (int)((size_t)prn - (size_t)rbuf->data));
+        buf->len = rbuf->size;
+        buf->base = rbuf->data;
+        nread = rbuf->size;
+        client->reader.status = RXS_DONE;
+    }
+
     client->request.parser_locked = true;
     enum llhttp_errno error = llhttp_execute(parser, buf->base, nread);
     if (error == HPE_PAUSED) {
@@ -571,6 +616,24 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
         return;
     }
     xbuf_t * rbuf = &client->rbuf;
+    if (client->reader.status == RXS_ACTIVE) {
+        if (!rbuf->data) {
+            LOGc("%s: __undefined_behavior__ rbuf not inited!", __func__);
+            return;  // error
+        }
+        if (rbuf->capacity <= 0 || rbuf->capacity <= read_buffer_size) {
+            LOGc("%s: __undefined_behavior__ rbuf with incorrect capacity = %d", __func__, rbuf->capacity);
+            return;  // error
+        }
+        if (rbuf->size == read_buffer_size) {
+            LOGc("%s: __undefined_behavior__ rbuf overflow = %d", __func__, rbuf->size);
+            return;  // error
+        }
+        buf->len = read_buffer_size - rbuf->size;
+        buf->base = rbuf->data + rbuf->size;
+        buf->base[0] = 0;
+        return;  // OK
+    }
     if (!rbuf->data) {
         int err = xbuf_init2(rbuf, client->buf_read_prealloc, read_buffer_size + 3);
         if (err)
@@ -593,6 +656,7 @@ void connection_cb(uv_stream_t * server, int status)
     LOGi("new connection =================================");
     client_t* client = calloc(1, sizeof(client_t) + g_srv.read_buffer_size + 8);
     client->server = (server_t *)server;
+    client->reader.status = RXS_RESTBEG;  // for waiting a begining of useful data
 
     uv_tcp_init(g_srv.loop, &client->handle);
     

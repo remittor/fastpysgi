@@ -16,7 +16,7 @@ static const size_t MAX_max_chunk_size = 64*1024*1024;
 static const int def_max_content_length = 999999999;
 
 enum {
-    MIN_read_buffer_size = 2 * 1024,
+    MIN_read_buffer_size = 32 * 1024,
     def_read_buffer_size = 64 * 1024,
     MAX_read_buffer_size = 4 * 1024 * 1024
 };
@@ -69,6 +69,14 @@ struct srv {
 
 
 typedef enum {
+    RXS_DISABLED  = 0,
+    RXS_RESTBEG   = 1,  // wait first packet
+    RXS_ACTIVE    = 2,  // reading and waiting useful data '\r\n'
+    RXS_FAIL      = 3,
+    RXS_DONE      = 4,  // useful data readed
+} rx_status_t;
+
+typedef enum {
     PS_RESTING    = 0,  // pipeline not used
     PS_ACTIVE     = 1   // pipeline active for reading from master buffer
 } pl_status_t;
@@ -100,6 +108,11 @@ struct client {
     server_t * server;
     char remote_addr[64];
     xbuf_t rbuf;             // buffer for reading from socket
+    struct {
+        uint64_t pkt;        // total packet count of received from the socket
+        uint64_t total;      // total size of data received from the socket
+        rx_status_t status;
+    } reader;
     struct {
         pl_status_t status;  // pipeline status
         char * buf_base;     // master buffer with pipeline-requests

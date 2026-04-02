@@ -68,6 +68,7 @@ int get_obj_attr_list_tup(PyObject * obj, const char * name, int idx, PyObject *
 int get_obj_attr_bindlist(PyObject * obj, const char * name, int idx, const char ** host, int * port);
 
 int get_asctime(char ** asc_time);
+const char * find_crlf(const char * buf, size_t size);
 
 PyObject * get_function(PyObject * object);
 int get_func_sig_arg_count(PyObject * func);

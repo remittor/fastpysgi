@@ -166,6 +166,18 @@ int get_asctime(char ** asc_time)
     return 0;
 }
 
+const char * find_crlf(const char * buf, size_t size)
+{
+    if (buf && size >= 2) {
+        for (size_t i = 0; i < size - 1; i++) {
+            if (buf[i] == '\r' && buf[i + 1] == '\n') {
+                return buf + i;
+            }
+        }
+    }
+    return NULL;
+}
+
 PyObject * get_function(PyObject * object)
 {
     if (PyFunction_Check(object)) {
