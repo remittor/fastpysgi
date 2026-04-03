@@ -6,7 +6,7 @@
 #include "start_response.h"
 
 
-void init_request_dict();
+void init_request_def_env();
 void configure_parser_settings(llhttp_settings_t * ps);
 void close_iterator(PyObject * iterator);
 

@@ -29,6 +29,11 @@ typedef struct server {
     int ipv6;
     char host[64];
     int port;
+    struct {
+        PyObject * obj;
+        char   str[128];
+        size_t len;       // length of root_path
+    } root_path;          // SCRIPT_NAME
     PyObject * def_env;   // default environ dict for WSGI
     PyObject * def_scope; // default scope dict for ASGI
 } server_t;

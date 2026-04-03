@@ -731,7 +731,7 @@ int init_srv(void)
 
     configure_parser_settings(&g_srv.parser_settings);
     init_constants();
-    init_request_dict();
+    init_request_def_env();
     PyType_Ready(&StartResponse_Type);
     if (g_srv.asgi_app) {
         PyType_Ready(&ASGI_Type);
@@ -835,8 +835,8 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         asyncio_load_cfg(&g_srv.aio);
     }
     int servers_num = get_obj_attr_bindlist(server, "bindlist", -1, NULL, NULL);
-    if (servers_num < 1) {
-        PyErr_Format(PyExc_ValueError, "Option bindlist not defined");
+    if (servers_num < 1 || servers_num > HTTP_SERVERS_MAX) {
+        PyErr_Format(PyExc_ValueError, "Option bindlist not defined or too long");
         return PyLong_FromLong(-1012);
     }
     if (servers_num > HTTP_SERVERS_MAX) {
@@ -884,6 +884,24 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     if (srvname && srvname[0]) {
         strncpy(g_srv.header_server, srvname, sizeof(g_srv.header_server) - 1);
         g_srv.add_header_server = (int)strlen(g_srv.header_server);
+    }
+    const char * root_path = get_obj_attr_str(server, "root_path");
+    if (root_path && root_path[0]) {
+        size_t root_path_len = strlen(root_path);
+        if (root_path_len < 2 || root_path[0] != '/' || root_path[1] == '/' || root_path_len >= sizeof(SERVER(0)->root_path)) {
+            PyErr_Format(PyExc_ValueError, "Option root_path contain incorrect value");
+            return PyLong_FromLong(-1019);
+        }
+        if (root_path[root_path_len - 1] == '/') {
+            root_path_len--;
+        }
+        for (int idx = 0; idx < servers_num; idx++) {
+            server_t * server = SERVER(idx);
+            memcpy(server->root_path.str, root_path, root_path_len);
+            server->root_path.str[root_path_len] = 0;
+            server->root_path.len = root_path_len;
+            server->root_path.obj = PyUnicode_FromString(server->root_path.str);
+        }
     }
     rv = get_obj_attr_int(server, "max_content_length");
     if (rv == LLONG_MIN) {
@@ -1058,6 +1076,14 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
     }
     if (g_srv.aio.asyncio) {
         asyncio_free(&g_srv.aio, false);
+    }
+    for (int idx = 0; idx < g_srv.servers_num; idx++) {
+        server_t * server = SERVER(idx);
+        if (server) {
+            Py_XDECREF(server->root_path.obj);
+            Py_XDECREF(server->def_env);
+            Py_XDECREF(server->def_scope);
+        }
     }
     g_srv_inited = 0;
     memset(&g_srv, 0, sizeof(g_srv));

@@ -248,7 +248,7 @@ int aio_loop_shutdown(asyncio_t * _aio)
 // -----------------------------------------------------------------------------------
 
 static
-void create_asgi_scope(void)
+void create_asgi_def_scope(void)
 {
     for (int idx = 0; idx < g_srv.servers_num; idx++) {
         server_t * server = SERVER(idx);
@@ -265,14 +265,23 @@ void create_asgi_scope(void)
         PyObject * g_scope = PyDict_New();
         PyDict_SetItem(g_scope, g_cv.type, g_cv.http);
         PyDict_SetItem(g_scope, g_cv.scheme, g_cv.http);
-        PyDict_SetItem(g_scope, g_cv.query_string, g_cv.empty_bytes);
         PyDict_SetItem(g_scope, g_cv.asgi, scope_asgi);
         Py_DECREF(scope_asgi);
-        //PyDict_SetItem(g_scope, g_cv.server, g_cv.empty_string); // FIXME
-        //PyDict_SetItem(g_scope, g_cv.SERVER_NAME, host);
-        //PyDict_SetItem(g_scope, g_cv.SERVER_PORT, port);
-        Py_DECREF(port);
-        Py_DECREF(host);
+        PyObject * hplist = PyList_New(0);
+        PyList_Append(hplist, host);
+        PyList_Append(hplist, port);
+        PyDict_SetItem(g_scope, g_cv.server, hplist);
+        Py_XDECREF(hplist);
+        Py_XDECREF(port);
+        Py_XDECREF(host);
+        // semi-const values
+        if (server->root_path.len > 0) {
+            PyDict_SetItem(g_scope, g_cv.root_path, server->root_path.obj);
+        }
+        // non constant values!!!
+        PyDict_SetItem(g_scope, g_cv.path, g_cv.empty_string);
+        PyDict_SetItem(g_scope, g_cv.raw_path, g_cv.empty_bytes);
+        PyDict_SetItem(g_scope, g_cv.query_string, g_cv.empty_bytes);
         server->def_scope = g_scope;
     }
 }
@@ -285,8 +294,12 @@ int asgi_init(client_t * client)
     PyObject * asgi = create_asgi(client);
     FIN_IF(!asgi, -4510001);
     client->asgi = (asgi_t *)asgi;
-    create_asgi_scope();
-    client->asgi->scope = PyDict_Copy(client->server->def_scope);
+    create_asgi_def_scope();
+    PyObject * scope = PyDict_Copy(client->server->def_scope);
+    PyObject * headers = PyList_New(0);
+    PyDict_SetItem(scope, g_cv.headers, headers);
+    Py_XDECREF(headers);
+    client->asgi->scope = scope;
     hr = 0;
     LOGt("%s: asgi = %p ", __func__, asgi);
 fin:

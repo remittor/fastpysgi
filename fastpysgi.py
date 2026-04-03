@@ -44,6 +44,7 @@ class _Server():
         self.lifespan_fose = 0          # ASGI: 0 = log and continue, 1 = server abort (fail_on_startup_error)
         self.req_hdr_lower = 1          # ASGI: 0 = not change case for header names, 1 = force lowercase
         self.resp_hdr_lower = None      # None = default mode, 0 = not change case for header names, 1 = force lowercase
+        self.root_path = None           # root path for requests; None value equ '/'
 
     def check_version(self):
         so_ver = _fastpysgi.get_version()

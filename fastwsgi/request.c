@@ -94,7 +94,9 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
                 Py_DECREF(scope_headers);
             }
             if (!PyBytes_Check(key)) {
-                kname = PyBytes_FromString(PyUnicode_AsUTF8(key));
+                const char * keystr = PyUnicode_AsUTF8(key);
+                FIN_IF(!keystr, -91);
+                kname = PyBytes_FromString(keystr);
             }
             PyObject * tup = PyTuple_Pack(2, (kname != NULL) ? kname : key, val);
             Py_XDECREF(kname);
@@ -132,7 +134,7 @@ int set_header_v(client_t * client, const char * key, const char * value, ssize_
     if (client->asgi) {
         pkey = PyBytes_FromStringAndSize(key, klen);
     } else {
-        pkey = PyUnicode_FromStringAndSize(key, klen);
+        pkey = PyUnicode_DecodeLatin1(key, klen, "ignore");
     }
     int retval = set_header(client, pkey, value, length, flags);
     Py_DECREF(pkey);
@@ -1120,7 +1122,7 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
     return 2;
 }
 
-void init_request_dict()
+void init_request_def_env()
 {
     for (int idx = 0; idx < g_srv.servers_num; idx++) {
         server_t * server = SERVER(idx);
@@ -1132,7 +1134,6 @@ void init_request_dict()
         PyObject * host = PyUnicode_FromString(server->host);
         // only constant values!!!
         PyObject * env = PyDict_New();
-        PyDict_SetItem(env, g_cv.SCRIPT_NAME, g_cv.empty_string);
         PyDict_SetItem(env, g_cv.SERVER_NAME, host);
         PyDict_SetItem(env, g_cv.SERVER_PORT, port);
         //PyDict_SetItem(env, g_cv.wsgi_input, io_BytesIO);   // not const!!!
@@ -1144,6 +1145,11 @@ void init_request_dict()
         PyDict_SetItem(env, g_cv.wsgi_multiprocess, Py_True);
         Py_DECREF(port);
         Py_DECREF(host);
+        // semi-const values
+        PyDict_SetItem(env, g_cv.SCRIPT_NAME, (server->root_path.len > 0) ? server->root_path.obj : g_cv.empty_string);
+        // non constant values!!!
+        PyDict_SetItem(env, g_cv.PATH_INFO, g_cv.empty_string);
+        PyDict_SetItem(env, g_cv.QUERY_STRING, g_cv.empty_string);
         server->def_env = env;
     }
 }
