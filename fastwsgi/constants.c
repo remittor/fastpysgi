@@ -38,6 +38,7 @@ void init_constants()
     g_cv.server_port = PyUnicode_FromString("5000");
     g_cv.empty_string = PyUnicode_FromString("");
     g_cv.empty_bytes = PyBytes_FromString("");
+    g_cv.slash = PyUnicode_FromString("/");
 
     g_cv.module_io = PyImport_ImportModule("io");
     g_cv.BytesIO = PyUnicode_FromString("BytesIO");

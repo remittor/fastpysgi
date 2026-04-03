@@ -39,24 +39,51 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
     PyObject * dict = NULL;
     PyObject * kname = NULL;
     PyObject * val = NULL;
-    if (client->asgi) {
-        PyObject * scope = client->asgi->scope;
-        dict = scope;
-        if (key == g_cv.PATH_INFO) {            
-            val = PyUnicode_DecodeLatin1(value, vlen, NULL);
-            FIN_IF(!val, -71);
-            hr = PyDict_SetItem(scope, g_cv.path, val);
-            Py_XDECREF(val);
-            FIN_IF(hr, hr);
-            kname = g_cv.raw_path;
-            val = NULL;
+    PyObject * val_aux = NULL;   // persent decoded UTF-8 string
+    PyObject * asgi_scope = (client->asgi != NULL) ? client->asgi->scope : NULL;
+    if (key == g_cv.PATH_INFO) {
+        void * penc = (vlen > 0) ? memchr(value, '%', vlen) : NULL;
+        if (penc) {
+            char * buf = (char *)value;  // tiny hack
+            ssize_t new_len = uri_percent_decode_inplace(buf, vlen);
+            FIN_IF(new_len < 0, -45);
+            vlen = new_len;
         }
-        else if (key == g_cv.QUERY_STRING) {
+        if (asgi_scope) {
+            val = PyBytes_FromStringAndSize(value, vlen);
+            FIN_if(!val, -40, PyErr_Clear());
+            if (penc == NULL) {
+                val_aux = PyUnicode_DecodeLatin1(value, vlen, "strict");  // without unicode symbols
+            } else {
+                val_aux = PyUnicode_DecodeUTF8(value, vlen, "strict");  // maybe with unicode symbols
+            }
+            FIN_if(!val_aux, -55, PyErr_Clear());
+            hr = PyDict_SetItem(asgi_scope, g_cv.path, val_aux);
+            FIN_if(hr, -56, PyErr_Clear());
+        } else {
+            dict = client->request.headers;
+            server_t * server = client->server;
+            if (server->root_path.len > 0) {
+                FIN_IF(vlen < (ssize_t)server->root_path.len, HTTP_STATUS_NOT_FOUND); // 404
+                int rc = memcmp(value, server->root_path.str, vlen);
+                FIN_IF(rc != 0, HTTP_STATUS_NOT_FOUND); // 404
+                if (vlen == server->root_path.len) {
+                    hr = PyDict_SetItem(dict, g_cv.PATH_INFO, g_cv.slash);
+                    FIN_if(hr, -66, PyErr_Clear());
+                    FIN(0);
+                }
+                FIN_IF(value[server->root_path.len] != '/', HTTP_STATUS_NOT_FOUND); // 404
+                value += server->root_path.len;
+                vlen -= server->root_path.len;
+            }
+            val = PyUnicode_DecodeUTF8(value, vlen, "strict");  // maybe with unicode symbols
+            FIN_if(!val, -68, PyErr_Clear());
+        }
+    }
+    if (asgi_scope) {
+        dict = asgi_scope;
+        if (key == g_cv.QUERY_STRING) {
             kname = g_cv.query_string;
-        }
-        else if (key == g_cv.SCRIPT_NAME) {
-            kname = g_cv.root_path;
-            val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
         }
         else if (key == g_cv.REQUEST_METHOD) {
             kname = g_cv.method;
@@ -74,10 +101,10 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
             if (key == g_cv.CONTENT_LENGTH) {
                 key = g_cv.content_length;
             }
-            PyObject * scope_headers = PyDict_GetItem(scope, g_cv.headers);
+            PyObject * scope_headers = PyDict_GetItem(asgi_scope, g_cv.headers);
             if (!scope_headers) {
                 scope_headers = PyList_New(0);
-                PyDict_SetItem(scope, g_cv.headers, scope_headers);
+                PyDict_SetItem(asgi_scope, g_cv.headers, scope_headers);
                 Py_DECREF(scope_headers);
             }
             if (!PyBytes_Check(key)) {
@@ -96,11 +123,16 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
     } else {
         dict = client->request.headers;
         kname = key;
-        if (key == g_cv.PATH_INFO || key == g_cv.QUERY_STRING) {
-            val = PyUnicode_DecodeLatin1(value, vlen, "ignore");
+        if (key == g_cv.PATH_INFO) {
+            FIN_IF(!val, -95);
+        }
+        else if (key == g_cv.QUERY_STRING) {
+            val = PyUnicode_DecodeLatin1(value, vlen, "strict");
             FIN_if(!val, -96, PyErr_Clear());
-        } else {
-            val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
+        }
+        if (!val) {
+            val = PyUnicode_DecodeUTF8(value, vlen, "ignore");  // as UTF-8
+            FIN_if(!val, -97, PyErr_Clear());
         }
     }
     FIN_IF(!dict, -3);
@@ -110,6 +142,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
     FIN_if(hr, -6, PyErr_Clear());
 fin:
     Py_XDECREF(val);
+    Py_XDECREF(val_aux);
     return hr;
 }
 
@@ -252,24 +285,38 @@ int on_url(llhttp_t * parser, const char * data, size_t length)
 
 int on_url_complete(llhttp_t * parser)
 {
+    int hr = 0;
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_URL;
     xbuf_t * buf = &client->head;
     LOGi("%s: \"%s\"", __func__, buf->data);
     char * path = buf->data;
-    ssize_t path_len = buf->size;
-    char * query = strchr(buf->data, '?');
-    if (query) {        
-        *query++ = 0;
-        ssize_t query_len = strlen(query);
-        if (query_len > 0) {
-            set_header(client, g_cv.QUERY_STRING, query, query_len, 0);
-        }
-        path_len = strlen(path);
+    size_t path_len = (size_t)buf->size;
+    char * query = (char *)memchr(path, '?', path_len);
+    size_t query_len = 0;
+    if (query) {
+        path_len = (size_t)query - (size_t)path;
+        query[0] = 0;  // change '?' to '\0'
+        query++;       // fix ptr for QUERY_STRING
+        query_len = (size_t)buf->size - path_len - 1;
     }
-    set_header(client, g_cv.PATH_INFO, path, path_len, 0);
+    if (path_len == 0) {
+        LOGe("%s: empty PATH", __func__);
+        client->error = HTTP_STATUS_BAD_REQUEST; // 400
+        FIN(-1);
+    } else {
+        hr = set_header(client, g_cv.PATH_INFO, path, path_len, 0);
+        LOGc_IF(hr, "%s: malformed PATH = \"%s\"", __func__, path);
+        FIN_if(hr, -1, client->error = (hr < 0) ? HTTP_STATUS_BAD_REQUEST : hr);
+    }
+    if (query_len > 0) {
+        hr = set_header(client, g_cv.QUERY_STRING, query, query_len, 0);
+        LOGc_IF(hr, "%s: malformed QUERY = \"%s\"", __func__, query);
+        FIN_if(hr, -1, client->error = (hr < 0) ? HTTP_STATUS_BAD_REQUEST : hr);
+    }
+fin:
     reset_head_buffer(client);
-    return 0;
+    return hr;
 }
 
 int on_header_field(llhttp_t * parser, const char * data, size_t length)

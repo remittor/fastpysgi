@@ -69,6 +69,7 @@ int get_obj_attr_bindlist(PyObject * obj, const char * name, int idx, const char
 
 int get_asctime(char ** asc_time);
 const char * find_crlf(const char * buf, size_t size);
+ssize_t uri_percent_decode_inplace(char * buf, size_t size);
 
 PyObject * get_function(PyObject * object);
 int get_func_sig_arg_count(PyObject * func);
@@ -91,6 +92,22 @@ INLINE
 char ASCII_TO_UPPER(char symbol)
 {
     return (symbol >= 'a' && symbol <= 'z') ? symbol - ('a' - 'A') : symbol;
+}
+
+static
+INLINE
+char HEX_TO_DIG(char symbol)
+{
+    if (symbol >= '0' && symbol <= '9') {
+        return symbol - '0';
+    }
+    if (symbol >= 'A' && symbol <= 'F') {
+        return symbol - 'A' + 10;
+    }
+    if (symbol >= 'a' && symbol <= 'f') {
+        return symbol - 'a' + 10;
+    }
+    return -1;
 }
 
 static

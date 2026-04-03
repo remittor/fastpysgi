@@ -32,6 +32,7 @@ typedef struct {
     PyObject* server_port;
     PyObject* empty_string;
     PyObject* empty_bytes;  // b""
+    PyObject* slash;
 
     PyObject* module_io;
     PyObject* BytesIO;

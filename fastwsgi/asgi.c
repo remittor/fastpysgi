@@ -297,6 +297,7 @@ int asgi_init(client_t * client)
     client->asgi = (asgi_t *)asgi;
     create_asgi_def_scope();
     PyObject * scope = PyDict_Copy(client->server->def_scope);
+    FIN_IF(!scope, -4510002);
     PyObject * headers = PyList_New(0);
     PyDict_SetItem(scope, g_cv.headers, headers);
     Py_XDECREF(headers);

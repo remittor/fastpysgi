@@ -178,6 +178,34 @@ const char * find_crlf(const char * buf, size_t size)
     return NULL;
 }
 
+ssize_t uri_percent_decode_inplace(char * buf, size_t size)
+{
+    char * src = buf;
+    char * dst = buf;
+    char * end = buf + size;
+    while (src < end) {
+        if (*src != '%') {
+            *dst++ = *src++;
+            continue;
+        }
+        if (src + 2 >= end) {
+            return -1;
+        }
+        const uint8_t hi = (uint8_t)HEX_TO_DIG(src[1]);
+        const uint8_t lo = (uint8_t)HEX_TO_DIG(src[2]);
+        if (hi == 0xFF || lo == 0xFF) {
+            return -1;
+        }
+        const uint8_t val = (hi << 4) | lo;
+        if ((val >= 0 && val < 0x20) || val == 0xFF) {
+            return -1;
+        }
+        *dst++ = (char)val;
+        src += 3;
+    }
+    return (ssize_t)(dst - buf);
+}
+
 PyObject * get_function(PyObject * object)
 {
     if (PyFunction_Check(object)) {
