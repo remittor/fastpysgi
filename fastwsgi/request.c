@@ -248,6 +248,10 @@ int on_url(llhttp_t * parser, const char * data, size_t length)
     LOGd("%s: (len = %d)", __func__, (int)length);
     if (length > 0) {
         client_t * client = (client_t *)parser->data;
+        if (client->head.size + length >= 16*1024) {
+            client->error = HTTP_STATUS_URI_TOO_LONG;
+            return -1;  // 414 URI Too Long
+        }
         xbuf_add(&client->head, data, length);
     }
     return 0;
@@ -283,6 +287,10 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
 
     LOGd("%s: '%.*s'", __func__, (int)length, data);
     client_t * client = (client_t *)parser->data;
+    if (client->head.size + length >= 32*1024) {
+        client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
+        return -1;  // 431 Request Header Fields Too Large
+    }
     if (client->request.current_key_len == 0 && !client->asgi) {
         xbuf_add(&client->head, "HTTP_", 5);
         client->request.current_key_len = 5;
@@ -354,6 +362,10 @@ int on_header_value(llhttp_t * parser, const char * data, size_t length)
             LOGc("%s: internal error (1)", __func__);
             return -1;  // critical error
         }
+    }
+    if (buf->size + length >= 32*1024) {
+        client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
+        return -1;  // 431 Request Header Fields Too Large
     }
     xbuf_add(buf, data, length);
     client->request.current_val_len += length;

@@ -509,7 +509,8 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
     if (error != HPE_OK) {
         const char * err_pos = llhttp_get_error_pos(parser);
         LOGe("Parse error: %s %s\n", llhttp_errno_name(error), client->request.parser.reason);
-        int act = send_fatal(client, HTTP_STATUS_BAD_REQUEST, NULL);
+        err = (client->error >= 400 && client->error < 500) ? client->error : HTTP_STATUS_BAD_REQUEST;
+        int act = send_fatal(client, err, NULL);
         err = 0;  // skip call send_error
         FIN(act);
     }
@@ -530,7 +531,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
             }
         }
         if (client->error) {
-            err = HTTP_STATUS_BAD_REQUEST;
+            err = (client->error >= 400 && client->error < 500) ? client->error : HTTP_STATUS_BAD_REQUEST;
             FIN(CA_OK);
         }
         LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld",
