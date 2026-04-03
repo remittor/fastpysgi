@@ -73,6 +73,8 @@ void init_constants()
     g_cv.body = PyUnicode_FromString("body");
     g_cv.more_body = PyUnicode_FromString("more_body");
 
+    g_cv.v1_0 = PyUnicode_FromString("1.0");
+    g_cv.v1_1 = PyUnicode_FromString("1.1");
     g_cv.v3_0 = PyUnicode_FromString("3.0");
     g_cv.v2_0 = PyUnicode_FromString("2.0");
     g_cv.http = PyUnicode_FromString("http");

@@ -62,19 +62,6 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
             kname = g_cv.method;
             val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
         }
-        else if (key == g_cv.SERVER_PROTOCOL) {
-            kname = g_cv.http_version;
-            if (client->request.parser.http_major == 1) {
-                if (client->request.parser.http_minor == 1) {
-                    val = PyUnicode_FromStringAndSize("1.1", 3);
-                } else {
-                    val = PyUnicode_FromStringAndSize("1.0", 3);
-                }
-            }
-            else if (client->request.parser.http_major == 2) {
-                val = PyUnicode_FromStringAndSize("2", 1);
-            }
-        }
         else if (key == g_cv.REMOTE_ADDR) {
             kname = g_cv.REMOTE_ADDR;  // FIXME: set "client"
         }
@@ -95,10 +82,12 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
             }
             if (!PyBytes_Check(key)) {
                 const char * keystr = PyUnicode_AsUTF8(key);
-                FIN_IF(!keystr, -91);
+                FIN_if(!keystr, -91, PyErr_Clear());
                 kname = PyBytes_FromString(keystr);
+                FIN_if(!kname, -92, PyErr_Clear());
             }
             PyObject * tup = PyTuple_Pack(2, (kname != NULL) ? kname : key, val);
+            FIN_if(!tup, -93, PyErr_Clear());
             Py_XDECREF(kname);
             PyList_Append(scope_headers, tup);
             Py_DECREF(tup);
@@ -108,7 +97,8 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
         dict = client->request.headers;
         kname = key;
         if (key == g_cv.PATH_INFO || key == g_cv.QUERY_STRING) {
-            val = PyUnicode_DecodeLatin1(value, vlen, NULL);
+            val = PyUnicode_DecodeLatin1(value, vlen, "ignore");
+            FIN_if(!val, -96, PyErr_Clear());
         } else {
             val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
         }
@@ -117,6 +107,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
     FIN_IF(!kname, -4);
     FIN_IF(!val, -5);
     hr = PyDict_SetItem(dict, kname, val);
+    FIN_if(hr, -6, PyErr_Clear());
 fin:
     Py_XDECREF(val);
     return hr;
@@ -287,8 +278,13 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
     if (length == 0)
         return 0;
 
-    LOGd("%s: '%.*s'", __func__, (int)length, data);
     client_t * client = (client_t *)parser->data;
+    if (parser->http_major != 1 || parser->http_minor != 1) {
+        LOGe("%s: recived protocol version = %d.%d (expected: v1.1)", __func__, parser->http_major, parser->http_minor);
+        client->error = HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED;
+        return -1;  // 505 HTTP Version Not Supported
+    }
+    LOGd("%s: '%.*s'", __func__, (int)length, data);
     if (client->head.size + length >= 32*1024) {
         client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
         return -1;  // 431 Request Header Fields Too Large
@@ -596,9 +592,6 @@ int on_message_complete(llhttp_t * parser)
     
     const char* method = llhttp_method_name(parser->method);
     set_header(client, g_cv.REQUEST_METHOD, method, -1, 0);
-
-    const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
-    set_header(client, g_cv.SERVER_PROTOCOL, protocol, -1, 0);
 
     if (client->remote_addr[0])
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
@@ -1146,6 +1139,7 @@ void init_request_def_env()
         Py_DECREF(port);
         Py_DECREF(host);
         // semi-const values
+        PyDict_SetItem(env, g_cv.SERVER_PROTOCOL, g_cv.HTTP_1_1);
         PyDict_SetItem(env, g_cv.SCRIPT_NAME, (server->root_path.len > 0) ? server->root_path.obj : g_cv.empty_string);
         // non constant values!!!
         PyDict_SetItem(env, g_cv.PATH_INFO, g_cv.empty_string);

@@ -275,6 +275,7 @@ void create_asgi_def_scope(void)
         Py_XDECREF(port);
         Py_XDECREF(host);
         // semi-const values
+        PyDict_SetItem(g_scope, g_cv.http_version, g_cv.v1_1);
         if (server->root_path.len > 0) {
             PyDict_SetItem(g_scope, g_cv.root_path, server->root_path.obj);
         }

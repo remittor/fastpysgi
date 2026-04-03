@@ -68,6 +68,8 @@ typedef struct {
     PyObject* body;  // "body"
     PyObject* more_body;  // "more_body"
 
+    PyObject* v1_0;  // "1.0"
+    PyObject* v1_1;  // "1.1"
     PyObject* v3_0;  // "3.0"
     PyObject* v2_0;  // "2.0"
     PyObject* http;  // "http"
