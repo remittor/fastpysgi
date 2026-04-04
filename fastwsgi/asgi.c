@@ -38,7 +38,7 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
     while (1) {
         uv_run(g_srv.loop, UV_RUN_NOWAIT);
         uv_metrics_info(g_srv.loop, uv_metrics_after);
-        if (uv_metrics_before->events - uv_metrics_before->events == 0) {
+        if (uv_metrics_after->events - uv_metrics_before->events == 0) {
             break;
         }
         PTR_SWAP(uv_metrics_before, uv_metrics_after);
