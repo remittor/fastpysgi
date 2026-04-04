@@ -67,7 +67,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
                 FIN_IF(vlen < (ssize_t)server->root_path.len, HTTP_STATUS_NOT_FOUND); // 404
                 int rc = memcmp(value, server->root_path.str, vlen);
                 FIN_IF(rc != 0, HTTP_STATUS_NOT_FOUND); // 404
-                if (vlen == server->root_path.len) {
+                if (vlen == (ssize_t)server->root_path.len) {
                     hr = PyDict_SetItem(dict, g_cv.PATH_INFO, g_cv.slash);
                     FIN_if(hr, -66, PyErr_Clear());
                     FIN(0);

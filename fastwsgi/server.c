@@ -762,9 +762,11 @@ int init_srv(void)
         FIN_IF(err, -9);
     }
     for (int idx = 0; idx < g_srv.servers_num; idx++) {
-        int err = uv_listen((uv_stream_t*)SERVER(idx), g_srv.backlog, connection_cb);
+        server_t * server = SERVER(idx);
+        int err = uv_listen((uv_stream_t*)server, g_srv.backlog, connection_cb);
         LOGe_IF(err, "Listen error %s", uv_strerror(err));
         FIN_IF(err, -10);
+        server->root_path.obj = PyUnicode_FromString(server->root_path.str);
     }
     if (g_srv.hook_sigint > 0) {
         uv_signal_init(g_srv.loop, &g_srv.signal);
@@ -802,6 +804,7 @@ fin:
 
 PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 {
+    int hr = -1;
     int64_t rv;
     PyObject * aio_loop = NULL;
 
@@ -888,19 +891,21 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     const char * root_path = get_obj_attr_str(server, "root_path");
     if (root_path && root_path[0]) {
         size_t root_path_len = strlen(root_path);
-        if (root_path_len < 2 || root_path[0] != '/' || root_path[1] == '/' || root_path_len >= sizeof(SERVER(0)->root_path)) {
+        size_t max_len = sizeof(SERVER(0)->root_path) - 1;
+        if (root_path_len < 2 || root_path[0] != '/' || root_path[1] == '/' || root_path_len >= max_len) {
             PyErr_Format(PyExc_ValueError, "Option root_path contain incorrect value");
             return PyLong_FromLong(-1019);
         }
         if (root_path[root_path_len - 1] == '/') {
             root_path_len--;
         }
+        FIN_IF(root_path_len < 2, -1019);
+        FIN_IF(root_path[root_path_len] == '/', -1019);
         for (int idx = 0; idx < servers_num; idx++) {
             server_t * server = SERVER(idx);
             memcpy(server->root_path.str, root_path, root_path_len);
             server->root_path.str[root_path_len] = 0;
             server->root_path.len = root_path_len;
-            server->root_path.obj = PyUnicode_FromString(server->root_path.str);
         }
     }
     rv = get_obj_attr_int(server, "max_content_length");
@@ -945,7 +950,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     rv = get_obj_attr_int(server, "nowait");
     g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
 
-    int hr = init_srv();
+    hr = init_srv();
     if (hr) {
         LOGc("%s: critical error = %d", __func__, hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
@@ -961,6 +966,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
             ver, host, port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
         set_log_level(saved_level);
     }
+fin:
     return PyLong_FromLong(hr);
 }
 
@@ -1067,11 +1073,17 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         if (g_srv.worker.type == UV_IDLE) {
             uv_idle_stop(&g_srv.worker);
             uv_close((uv_handle_t *)&g_srv.worker, NULL);
+            uv_run(g_srv.loop, UV_RUN_NOWAIT);
         }
         if (g_srv.aio.asyncio) {
             aio_loop_shutdown(&g_srv.aio);
         }
-        uv_close((uv_handle_t *)&g_srv, NULL);
+        for (int idx = 0; idx < g_srv.servers_num; idx++) {
+            uv_close((uv_handle_t *)SERVER(idx), NULL);
+        }
+        for (int num = 0; num < 10; num++) {
+            uv_run(g_srv.loop, UV_RUN_NOWAIT);  // let libuv process close callbacks
+        }
         uv_loop_close(g_srv.loop);
     }
     if (g_srv.aio.asyncio) {
