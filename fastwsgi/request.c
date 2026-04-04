@@ -42,10 +42,12 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
     PyObject * val_aux = NULL;   // persent decoded UTF-8 string
     PyObject * asgi_scope = (client->asgi != NULL) ? client->asgi->scope : NULL;
     if (key == g_cv.PATH_INFO) {
+        void * pbackslash = (vlen > 0) ? memchr(value, '\\', vlen) : NULL;
+        FIN_IF(pbackslash, -41);  // not valid character
         void * penc = (vlen > 0) ? memchr(value, '%', vlen) : NULL;
         if (penc) {
             char * buf = (char *)value;  // tiny hack
-            ssize_t new_len = uri_percent_decode_inplace(buf, vlen);
+            ssize_t new_len = uri_percent_decode_inplace(buf, vlen, 100);
             FIN_IF(new_len < 0, -45);
             vlen = new_len;
         }
