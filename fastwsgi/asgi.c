@@ -742,6 +742,7 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     } else {
         LOGd("%s: result type = %s", __func__, Py_TYPE(res)->tp_name);
     }
+    Py_XDECREF(res);  // release BEFORE stream_read_start
     LOGd("%s: RefCnt(asgi) = %d", __func__, (int)Py_REFCNT(self));
     hr = 0;
 //fin:
@@ -756,7 +757,6 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
         // In both cases the connection will be correctly resumed by the appropriate callback.
         stream_read_start(client);
     }
-    Py_XDECREF(res);
     Py_RETURN_NONE;
 }
 

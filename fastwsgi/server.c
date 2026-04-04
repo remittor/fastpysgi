@@ -42,6 +42,7 @@ int stream_read_start(client_t * client)
     int hr = 0;
     FIN_IF(client->response.write_req.client, -1);     // writes is active
     FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
+    FIN_IF(client->asgi != NULL, -3);                  // ASGI is still processing the request
     uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
     LOGd("%s: READ ACTIVATED", __func__);
 fin:
@@ -246,18 +247,17 @@ fin:
     if (!close_conn) {
         reset_response_body(client);
         wreq->client = NULL;  // free write_req
-        if (client->pipeline.status == PS_RESTING) {
-            // For WSGI: start reading immediately.
-            // For ASGI: start reading only if asgi_done() has already completed (client->asgi == NULL).
-            // If ASGI is still being processed, asgi_done() will call stream_read_start() later.
-            if (!client->asgi)
+        if (client->asgi) {
+            // ASGI hasn't completed yet (asgi_done hasn't been called)
+            // stream_read_start will call asgi_done when it's time
+            // Do nothing — asgi_done will take over
+        } else {
+            // WSGI or ASGI is already completed
+            if (client->pipeline.status == PS_RESTING) {
                 stream_read_start(client);
+            }
         }
-        // Pipeline: if pipeline is active, idle_worker_cb will invoke pipeline_cb
-        // automatically once wreq->client is NULL (the write lock is released).
-        // This works for both ASGI and WSGI without additional changes here.
-        // However, pipeline_cb checks client->asgi and will wait until asgi_done()
-        // clears it before processing the next pipelined request.
+        // If the pipeline is active, idle_worker will sort it out itself
     }
     if (close_conn) {
         close_connection(client);
