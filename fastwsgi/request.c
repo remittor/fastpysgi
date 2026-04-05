@@ -1189,7 +1189,7 @@ void init_request_def_env()
         PyDict_SetItem(env, g_cv.SERVER_PORT, port);
         //PyDict_SetItem(env, g_cv.wsgi_input, io_BytesIO);   // not const!!!
         PyDict_SetItem(env, g_cv.wsgi_version, g_cv.wsgi_ver_1_0);
-        PyDict_SetItem(env, g_cv.wsgi_url_scheme, g_cv.http_scheme);
+        PyDict_SetItem(env, g_cv.wsgi_url_scheme, (server->tls.enabled) ? g_cv.https : g_cv.http);
         PyDict_SetItem(env, g_cv.wsgi_errors, PySys_GetObject("stderr"));
         PyDict_SetItem(env, g_cv.wsgi_run_once, Py_False);
         PyDict_SetItem(env, g_cv.wsgi_multithread, Py_False);

@@ -6,6 +6,7 @@
 #include "request.h"
 #include "xbuf.h"
 #include "asgi.h"
+#include "tls.h"
 
 #define max_preloaded_body_chunks 48
 
@@ -23,7 +24,7 @@ enum {
 
 #define HTTP_SERVERS_MAX  (4)
 
-typedef struct server {
+struct server {
     uv_tcp_t server;   // Placement strictly at the beginning of the structure!
     struct srv * srv;  // pointer to global srv_t object (g_srv)
     int ipv6;
@@ -34,9 +35,10 @@ typedef struct server {
         char   str[128];
         size_t len;       // length of root_path
     } root_path;          // SCRIPT_NAME
+    tls_server_t tls;     // TLS config
     PyObject * def_env;   // default environ dict for WSGI
     PyObject * def_scope; // default scope dict for ASGI
-} server_t;
+}; /* server_t */ 
 
 struct srv {
     uv_loop_t* loop;
@@ -68,10 +70,11 @@ struct srv {
         int base_handles;  // number of base handles (listen socket + signal)
     } nowait;
     int exit_code;
+    PyObject * ssl_module;
     asyncio_t aio;
     int servers_num;        // number of servers 
     server_t servers[HTTP_SERVERS_MAX];
-};
+}; /* srv_t */
 
 
 typedef enum {
@@ -119,6 +122,7 @@ struct client {
         uint64_t total;      // total size of data received from the socket
         rx_status_t status;
     } reader;
+    tls_client_t tls;        // TLS client state. Active only if server->tls.enabled != 0
     struct {
         pl_status_t status;  // pipeline status
         char * buf_base;     // master buffer with pipeline-requests
@@ -157,10 +161,15 @@ struct client {
         int chunked;    // 1 = chunked sending; 2 = last chunk send
         write_req_t write_req;
     } response;
+    /* A separate write_req for sending TLS-encrypted data via libuv.
+     * Used in parallel with the main response.write_req:
+     * response.write_req — controls the response body logic.
+     * tls_wreq - sends encrypted output during the handshake and when encrypting regular responses. */
+    write_req_t tls_wreq;  // wreq.buf always points to client.tls.enc_out.data
     // preallocated buffers
     char buf_head_prealloc[2*1024];
     char buf_read_prealloc[1];
-};
+}; /* client_t */
 
 extern srv_t g_srv;
 

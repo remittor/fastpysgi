@@ -45,6 +45,7 @@ class _Server():
         self.req_hdr_lower = 1          # ASGI: 0 = not change case for header names, 1 = force lowercase
         self.resp_hdr_lower = None      # None = default mode, 0 = not change case for header names, 1 = force lowercase
         self.root_path = None           # root path for requests; None value equ '/'
+        self.tls_list = None            # list of tuple ( certfile, keyfile, ca_certs )
 
     def check_version(self):
         so_ver = _fastpysgi.get_version()
@@ -57,9 +58,41 @@ class _Server():
         if not isinstance(self.bindlist, list) or not all(isinstance(item, tuple) for item in self.bindlist):
             raise Exception("Param bindlist is incorrect!")
 
+    def check_ssl_params(self):
+        if self.tls_list is None:
+            return
+        if not isinstance(self.tls_list, list) or not self.tls_list:
+            raise Exception("Param tls_list is incorrect!")
+        for idx, srv in enumerate(self.bindlist):
+            if idx < len(self.tls_list):
+                tls = self.tls_list[idx]
+                if tls is not None:
+                    if not isinstance(tls, tuple) or len(tls) < 1:
+                        raise Exception("Param tls_list is incorrect!")
+                    if not os.path.isfile(tls[0]):
+                        raise FileNotFoundError(f'TLS certfile not found: {tls[0]!r}')
+                    if len(tls) > 1 and tls[1] is not None and not os.path.isfile(tls[1]):
+                        raise FileNotFoundError(f'TLS keyfile not found: {tls[1]!r}')
+                    if len(tls) > 2 and tls[2] is not None and not os.path.isfile(tls[2]):
+                        raise FileNotFoundError(f'TLS ca-certs not found: {tls[2]!r}')
+
     def check_all(self):
         self.check_version()
         self.check_bindlist()
+        self.check_ssl_params()
+
+    def delete_all_binds(self):
+        self.bindlist = [ ]
+        self.tls_list = None
+
+    def add_bind(self, host = None, port = None, tls = None):
+        if not host or not port:
+            raise ValueError("Incorrect host or port!")
+        idx = find_bind_by_opt(host, port)
+        self.bindlist.append( ( host, port ) )
+        if not self.tls_list:
+            self.tls_list = [ ]
+        self.tls_list.append( tls )
 
     def init(self, app, host = None, port = None, loglevel = None, workers = None):
         self.app = app
@@ -122,10 +155,13 @@ class _Server():
         return 0
 
     def get_bind_addr(self, idx = 0):
-        proto = 'http'
+        scheme = 'http'
+        if self.tls_list and len(self.tls_list) > idx and self.tls_list[idx]:
+            if self.tls_list[idx][0]:
+                scheme = 'https'
         host = self.bindlist[idx][0]
         port = self.bindlist[idx][1]
-        return f'{proto}://{host}:{port}'
+        return f'{scheme}://{host}:{port}'
 
 server = _Server()
 
@@ -191,6 +227,24 @@ def run_from_cli():
         default=server.loglevel,
         help=f"Logging level 0..8 (default: {server.loglevel})",
     )
+    parser.add_argument(
+        "--certfile",
+        type=str,
+        default=None,
+        help="Path to the TLS certificate PEM file (enables HTTPS)",
+    )
+    parser.add_argument(
+        "--keyfile",
+        type=str,
+        default=None,
+        help="Path to the PEM file of the private TLS key",
+    )
+    parser.add_argument(
+        "--ca-certs",
+        type=str,
+        default=None,
+        help="Path to CA bundle for validating client certificates",
+    )
 
     args = parser.parse_args()
 
@@ -199,6 +253,9 @@ def run_from_cli():
     except ImportError as e:
         print(f"Error importing WSGI app: {e}", file=sys.stderr)
         sys.exit(1)
+
+    if args.certfile:
+        server.tls_list = [ ( args.certfile, args.keyfile, args.ca_certs ) ]
 
     server.init(app, args.host, args.port, args.loglevel)
     print(f"FastPySGI server listening at", server.get_bind_addr())

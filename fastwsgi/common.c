@@ -80,6 +80,7 @@ int get_obj_attr_list_tup(PyObject * obj, const char * name, int idx, PyObject *
     int hr = -1;
     PyObject * list = PyObject_GetAttrString(obj, name);
     FIN_IF(!list, -1);
+    FIN_IF(list == Py_None, -41);
     FIN_IF(!PyList_Check(list), -2);
     int size = (int)PyList_GET_SIZE(list);
     FIN_IF(size < 1, -3);
@@ -87,6 +88,7 @@ int get_obj_attr_list_tup(PyObject * obj, const char * name, int idx, PyObject *
     FIN_IF(idx >= size, -4);  // incorrect idx
     PyObject * tup = PyList_GET_ITEM(list, idx);
     FIN_IF(!tup, -5);
+    FIN_IF(tup == Py_None, -42);
     FIN_IF(!PyTuple_Check(tup), -6);
     size = (int)PyTuple_GET_SIZE(tup);
     FIN_IF(size <= 0, -7);

@@ -73,6 +73,7 @@ void close_cb(uv_handle_t * handle)
     client->reader.status = RXS_DISABLED;
     free_read_buffer(client, NULL);
     asgi_free(client);
+    tls_client_free(client);
     free(client);
     update_log_prefix(NULL);
 }
@@ -134,6 +135,16 @@ int x_send_status(client_t * client, int status)
     //len += sprintf(hdr_buf + len, "Content-Length: 0\r\n");
     len += sprintf(hdr_buf + len, "\r\n");
 
+    if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
+        // Encrypt and send via tls_flush_enc_out
+        int rc = tls_encrypt(client, hdr_buf, len);
+        if (rc < 0) {
+            LOGe_IF(rc, "%s: tls_encrypt failed", __func__);
+            return -1;
+        }
+        return tls_flush_enc_out(client);
+    }
+    // Unencrypted sending (normal mode)
     size_t buf_size = sizeof(x_write_req_t) + len + 16;
     x_write_req_t * wreq = (x_write_req_t *)malloc(buf_size);
     wreq->client = client;
@@ -266,6 +277,14 @@ fin:
 
 int stream_write(client_t * client)
 {
+    /*
+     * If TLS is active, we collect all plaintext data into a single buffer,
+     * encrypt it via SSLObject.write() and send the encrypted data 
+     * via a separate tls_write_req_t (tls_wreq).
+     */
+    if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
+        return tls_stream_write(client);
+    }
     write_req_t * wreq = &client->response.write_req;
     uv_buf_t * buf = wreq->bufs;
     int total_len = 0;
@@ -445,6 +464,31 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
     }
     rbuf->size += (int)nread;
 
+    if (client->reader.status == RXS_ACTIVE && rbuf->size != (int)client->reader.total) {
+        LOGc("%s: [UB] RXS_ACTIVE: size = %d, total = %d", __func__, (int)rbuf->size, (int)client->reader.total);
+        FIN(CA_SHUTDOWN);
+    }
+
+    if (client->tls.enabled) {
+        // TLS: Processing Encrypted Incoming Data
+        int act = tls_read_cb(client, nread, buf);
+        // Free the original encrypted buffer
+        free_read_buffer(client, _buf->base);
+        if (act == 100 + TLS_HS_PENDING) {
+            // No decrypted data - waiting for the next reading
+            stream_read_start(client);
+            return;
+        }
+        FIN_IF(act != CA_OK, act);
+        // buf->base already patched !!!
+        // patch nread (decrypted data size)
+        nread = (ssize_t)buf->len;
+        if (nread == 0) {
+            FIN_IF(client->tls.close_notify, CA_CLOSE);
+            stream_read_start(client);
+            return;
+        }
+    }
     if (g_log_level >= LL_TRACE) {
         LOGt("HTTP REQUEST RAW DATA [%d]:\n%.*s", (int)nread, (int)nread, buf->base);
     }
@@ -550,6 +594,13 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
     hr = stream_write(client);
 
 fin:
+    if (client->tls.close_notify) {
+        // The client sent a TLS close_notify => terminating the connection
+        LOGn("%s: [TLS] CLOSE_NOTIFY received => closing the connection", __func__);
+        if (hr == CA_OK) {
+            hr = CA_CLOSE;
+        }
+    }
     if (buf)
         free_read_buffer(client, buf->base);
 
@@ -633,10 +684,11 @@ void connection_cb(uv_stream_t * uvserver, int status)
         return;
     }
     server_t * server = (server_t *)uvserver;
-    LOGi("new connection =================================");
+    LOGi("new connection ================================= %s", server->tls.enabled ? "[TLS]" : "");
     client_t* client = calloc(1, sizeof(client_t) + g_srv.read_buffer_size + 8);
     client->server = server;
     client->reader.status = RXS_DISABLED;
+    client->tls.enabled = server->tls.enabled;
 
     uv_tcp_init(g_srv.loop, &client->handle);
     
@@ -679,7 +731,16 @@ void connection_cb(uv_stream_t * uvserver, int status)
         }
     }
     update_log_prefix(client);
-    LOGn("connected =================================");
+    LOGn("connected ================================= %s", client->tls.enabled ? "[TLS]" : "");
+    if (client->tls.enabled) {
+        // Initialize TLS for a new connection if enabled.
+        if (tls_client_init(client, NULL) != 0) {
+            LOGe("%s: tls_client_init failed => closing connection", __func__);
+            uv_close((uv_handle_t *)&client->handle, close_cb);
+            return;
+        }
+        LOGi("%s: [TLS] client initialized", __func__);
+    }
     llhttp_init(&client->request.parser, HTTP_REQUEST, &g_srv.parser_settings);
     client->request.parser.data = client;
     stream_read_start(client);
@@ -710,6 +771,8 @@ int init_srv(void)
 
     configure_parser_settings(&g_srv.parser_settings);
     init_constants();
+    int tls_num = tls_server_init_all();
+    FIN_IF(tls_num < 0, tls_num);
     init_request_def_env();
     PyType_Ready(&StartResponse_Type);
     if (g_srv.asgi_app) {
@@ -777,6 +840,8 @@ fin:
 
         if (g_srv.aio.asyncio)
             asyncio_free(&g_srv.aio, false);
+
+        tls_server_free(NULL);
     }    
     return hr;
 }
@@ -939,10 +1004,11 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         const char * host = g_srv.servers[0].host;
         int port          = g_srv.servers[0].port;
         const char * app = (g_srv.asgi_app) ? "ASGI" : "WSGI";
+        const char * tls = (g_srv.servers[0].tls.enabled) ? ", [TLS]" : "";
         int saved_level = g_log_level;
         set_log_level(LL_INFO);
-        LOGi("version: %s, host: \"%s\", port: %d, app: %s, hook_sigint: %d, nowait.mode: %d, loglevel: %d",
-            ver, host, port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level);
+        LOGi("version: %s, host: \"%s\", port: %d, app: %s, hook_sigint: %d, nowait.mode: %d, loglevel: %d%s",
+            ver, host, port, app, g_srv.hook_sigint, g_srv.nowait.mode, saved_level, tls);
         set_log_level(saved_level);
     }
 fin:
@@ -1076,6 +1142,7 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
             Py_XDECREF(server->def_scope);
         }
     }
+    tls_server_free(NULL);
     g_srv_inited = 0;
     memset(&g_srv, 0, sizeof(g_srv));
     Py_RETURN_NONE;

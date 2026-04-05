@@ -130,7 +130,6 @@ void xbuf_free(xbuf_t * buf)
     buf->capacity = 0;
 }
 
-#define XBUF_FREE(_buf_)  do { if (&(_buf_)) xbuf_free(&(_buf_)); } while(0)
 #define XBUF_CLEAR(_buf_) do { if (_buf_) xbuf_free(_buf_); _buf_ = NULL; } while(0)
 
 #endif

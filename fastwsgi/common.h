@@ -32,6 +32,17 @@
 #define FIN_if(_cond_, _code_, ...) do { if ((_cond_)) { __VA_ARGS__; hr = (_code_); goto fin; } } while(0)
 #define FIN_NOP ((void)0)
 
+#if defined(_MSC_VER)
+#define ATTR_PACKED
+#define PRAGMA_PACK_1    __pragma(pack(push, 1))
+#define PRAGMA_PACK_DEF  __pragma(pack(pop))
+#else
+#define ATTR_PACKED  __attribute__((packed))
+#define PRAGMA_PACK_1    // nothing
+#define PRAGMA_PACK_DEF  // nothing
+#endif
+
+
 typedef union {
     struct sockaddr_storage storage;
     struct sockaddr addr; 
@@ -77,6 +88,7 @@ bool is_coroutine_function(PyObject * func);
 
 
 typedef struct srv srv_t;
+typedef struct server server_t;
 typedef struct client client_t;
 
 

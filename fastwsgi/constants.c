@@ -30,7 +30,6 @@ void init_constants()
     g_cv.wsgi_input = PyUnicode_FromString("wsgi.input");
     g_cv.wsgi_ver_1_0 = Py_BuildValue("(ii)", 1, 0);
 
-    g_cv.http_scheme = PyUnicode_FromString("http");
     g_cv.HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");
     g_cv.HTTP_1_0 = PyUnicode_FromString("HTTP/1.0");
 

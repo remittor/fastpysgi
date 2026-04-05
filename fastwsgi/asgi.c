@@ -264,7 +264,7 @@ void create_asgi_def_scope(void)
         PyDict_SetItem(scope_asgi, g_cv.spec_version, g_cv.v2_0);
         PyObject * g_scope = PyDict_New();
         PyDict_SetItem(g_scope, g_cv.type, g_cv.http);
-        PyDict_SetItem(g_scope, g_cv.scheme, g_cv.http);
+        PyDict_SetItem(g_scope, g_cv.scheme, (server->tls.enabled) ? g_cv.https : g_cv.http);
         PyDict_SetItem(g_scope, g_cv.asgi, scope_asgi);
         Py_DECREF(scope_asgi);
         PyObject * hplist = PyList_New(0);
