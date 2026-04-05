@@ -446,9 +446,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
     rbuf->size += (int)nread;
 
     if (g_log_level >= LL_TRACE) {
-        if ((ssize_t)buf->len > nread)
-            buf->base[nread] = 0;
-        LOGt(buf->base);
+        LOGt("HTTP REQUEST RAW DATA [%d]:\n%.*s", (int)nread, (int)nread, buf->base);
     }
 
     client->request.parser_locked = true;

@@ -975,8 +975,17 @@ fin:
     if (hr < 0) {
         return hr;
     }
-    LOGt(head->data);
-    LOGt_IF(body_size > 0 && client->response.body_chunk_num, PyBytes_AS_STRING(body[0]));
+    if (g_log_level >= LL_TRACE && head->size >= 2) {
+        int hsize = head->size - 2;
+        const char * data = (body_size > 0 && client->response.body_chunk_num) ? PyBytes_AS_STRING(body[0]) : NULL;
+        Py_ssize_t data_size = (body_size > 0 && client->response.body_chunk_num) ? PyBytes_GET_SIZE(body[0]) : 0;
+        int dsize = (data_size <= 128) ? (int)data_size : 128;
+        if (data && dsize > 0) {
+            LOGt("HTTP RESPONSE RAW DATA [%d+%d]:\n%.*s\n%.*s", head->size, (int)body_size, hsize, head->data, dsize, data);
+        } else {
+            LOGt("HTTP RESPONSE RAW DATA [%d+%d]:\n%.*s", head->size, (int)body_size, hsize, head->data);
+        }
+    }
     client->response.headers_size = head->size;
     return head->size;
 }
