@@ -47,7 +47,8 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
         void * penc = (vlen > 0) ? memchr(value, '%', vlen) : NULL;
         if (penc) {
             char * buf = (char *)value;  // tiny hack
-            ssize_t new_len = uri_percent_decode_inplace(buf, vlen, 100);
+            int skip2F = 1;
+            ssize_t new_len = uri_percent_decode_inplace(buf, vlen, skip2F, 100);
             FIN_IF(new_len < 0, -45);
             vlen = new_len;
         }

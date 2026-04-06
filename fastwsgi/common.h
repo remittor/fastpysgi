@@ -80,7 +80,7 @@ int get_obj_attr_bindlist(PyObject * obj, const char * name, int idx, const char
 
 int get_asctime(char ** asc_time);
 const char * find_crlf(const char * buf, size_t size);
-ssize_t uri_percent_decode_inplace(char * buf, size_t size, int check);
+ssize_t uri_percent_decode_inplace(char * buf, size_t size, int skip2F, int check);
 
 PyObject * get_function(PyObject * object);
 int get_func_sig_arg_count(PyObject * func);

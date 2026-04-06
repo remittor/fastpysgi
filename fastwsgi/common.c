@@ -180,7 +180,7 @@ const char * find_crlf(const char * buf, size_t size)
     return NULL;
 }
 
-ssize_t uri_percent_decode_inplace(char * buf, size_t size, int check)
+ssize_t uri_percent_decode_inplace(char * buf, size_t size, int skip2F, int check)
 {
     int hr = -1;
     char * src = buf;
@@ -189,6 +189,7 @@ ssize_t uri_percent_decode_inplace(char * buf, size_t size, int check)
     uint8_t prev = 0;
     while (src < end) {
         if (*src != '%') {
+            prev = (uint8_t)*src;
             *dst++ = *src++;
             continue;
         }
@@ -197,6 +198,13 @@ ssize_t uri_percent_decode_inplace(char * buf, size_t size, int check)
         const uint8_t lo = (uint8_t)HEX_TO_DIG(src[2]);
         FIN_IF(hi == 0xFF || lo == 0xFF, -2);
         const uint8_t val = (hi << 4) | lo;
+        if ((char)val == '/' && skip2F) {
+            *dst++ = *src++;  // "%"
+            *dst++ = *src++;  // "2"
+            *dst++ = *src++;  // "F"
+            prev = 0x01;
+            continue;  // skip "%2F"
+        }
         if (check) {
             FIN_IF(check >= 1 && val >= 0 && val < 0x20, -11);
             FIN_IF(check >= 2 && val == 0xFF, -12);
