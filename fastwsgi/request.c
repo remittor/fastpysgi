@@ -610,6 +610,7 @@ fin:
 
 int on_message_complete(llhttp_t * parser)
 {
+    int hr = -1;
     LOGi("%s", __func__);
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_END;
@@ -662,6 +663,7 @@ int on_message_complete(llhttp_t * parser)
     
     const char* method = llhttp_method_name(parser->method);
     set_header(client, g_cv.REQUEST_METHOD, method, -1, 0);
+    FIN_if(parser->method == HTTP_CONNECT, -1, client->error = HTTP_STATUS_NOT_IMPLEMENTED);  // not supported => 501
 
     if (client->remote_addr[0])
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
@@ -674,7 +676,9 @@ int on_message_complete(llhttp_t * parser)
     }
 
     client->request.load_state = LS_OK;
-    return HPE_PAUSED;
+    hr = HPE_PAUSED;
+fin:
+    return hr;
 }
 
 int on_reset(llhttp_t * parser)
