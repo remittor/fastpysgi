@@ -509,6 +509,7 @@ int on_header_value_complete(llhttp_t * parser)
         FIN_if(hr, -1, client->error = (hr < 0) ? HTTP_STATUS_BAD_REQUEST : hr);
         if (hname == HN_HOST) {
             FIN_if(client->request.host, -1, client->error = HTTP_STATUS_BAD_REQUEST); // DUPLICATE-HOST
+            FIN_if(val_len == 0, -1, client->error = HTTP_STATUS_BAD_REQUEST);  // empty value
             client->request.host = PyUnicode_DecodeUTF8(val, val_len, "ignore");  // as UTF-8
             FIN_if(!client->request.host, -999, PyErr_Clear());
         }
