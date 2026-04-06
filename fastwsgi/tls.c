@@ -708,7 +708,8 @@ int tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf)
         // We check whether data has appeared to be sent to the client during the handshake.
         if (tls_has_encrypted_output(client) > 0) {
             tls_drain_to_enc_out(client);
-            tls_flush_enc_out(client);
+            int rc = tls_flush_enc_out(client);
+            FIN_IF(rc < 0, CA_SHUTDOWN);
         }
         if (hs == TLS_HS_ERROR) {
             LOGe("%s: handshake failed => closing the connection", __func__);

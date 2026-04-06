@@ -42,7 +42,6 @@ int stream_read_start(client_t * client)
     int hr = 0;
     FIN_IF(client->response.write_req.client, -1);     // writes is active
     FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
-    FIN_IF(client->asgi != NULL, -3);                  // ASGI is still processing the request
     uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
     LOGd("%s: READ ACTIVATED", __func__);
 fin:
@@ -440,6 +439,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         char err_name[128];
         uv_err_name_r((int)nread, err_name, sizeof(err_name) - 1);
         LOGd("read_cb: nread = %d  error: %s", (int)nread, err_name);
+        FIN_IF(nread == UV_EOF && client->tls.enabled, CA_SHUTDOWN);  // remote peer disconnected
         FIN_IF(nread == UV_EOF, CA_CLOSE);  // remote peer disconnected
         LOGe_IF(nread != UV_ECONNRESET, "%s: Read error: %s", __func__, err_name);
         FIN(CA_SHUTDOWN);
