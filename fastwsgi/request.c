@@ -495,7 +495,7 @@ int on_header_value_complete(llhttp_t * parser)
     }
     else if (hname == HN_EXPECT) {
         if (val_len != 12 || strncmp(val, "100-continue", 12) != 0) {
-            client->error = 1;
+            client->error = HTTP_STATUS_EXPECTATION_FAILED;  // 417
             LOGc("%s: Header \"Expect\" contain unsupported value = '%s'", __func__, val);
             // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Expect
             return -1;  // critical error
