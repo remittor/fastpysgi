@@ -534,7 +534,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         LOGe("Parse error: %s %s\n", llhttp_errno_name(error), client->request.parser.reason);
         err = HTTP_STATUS_BAD_REQUEST;
         err = (client->error >= 400 && client->error < 600) ? client->error : err;
-        err = (error == HPE_INVALID_VERSION) ? HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED : err;
+        err = (error == HPE_INVALID_VERSION && parser->reason && parser->reason[0] == 'I') ? HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED : err;
         int act = send_fatal(client, err, NULL);
         err = 0;  // skip call send_error
         FIN(act);
