@@ -426,11 +426,13 @@ typedef enum {
     HN_CONTENT_TYPE      = 2,
     HN_TRANSFER_ENCODING = 3,
     HN_EXPECT            = 4,
+    HN_HOST              = 5,
     HN__MAX
 } header_name_t;
 
 int on_header_value_complete(llhttp_t * parser)
 {
+    int hr = -1;
     client_t * client = (client_t *)parser->data;
     xbuf_t * buf = &client->head;
     size_t key_len = client->request.current_key_len;
@@ -453,6 +455,8 @@ int on_header_value_complete(llhttp_t * parser)
             hname = HN_TRANSFER_ENCODING;
         else if (key_len == 6 && strcasecmp(key, "EXPECT") == 0)
             hname = HN_EXPECT;
+        else if (key_len == 4 && strcasecmp(key, "HOST") == 0)
+            hname = HN_HOST;
     } else {
         if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0)
             hname = HN_CONTENT_LENGTH;
@@ -462,6 +466,8 @@ int on_header_value_complete(llhttp_t * parser)
             hname = HN_TRANSFER_ENCODING;
         else if (key_len == 11 && strncmp(key, "HTTP_EXPECT", 11) == 0)
             hname = HN_EXPECT;
+        else if (key_len == 9 && strncmp(key, "HTTP_HOST", 9) == 0)
+            hname = HN_HOST;
     }
     if (hname == HN_UNKNOWN) {
         // nothing
@@ -497,17 +503,31 @@ int on_header_value_complete(llhttp_t * parser)
         client->request.expect_continue = 1;
         key = NULL;  // hide Expect header
     }
-    if (key)
-        set_header_v(client, key, val, val_len, 0);
-
+    if (key) {
+        hr = set_header_v(client, key, val, val_len, 0);
+        LOGc_IF(hr, "%s: malformed header \"%s\" = \"%.*s\"", __func__, key, (int)val_len, val);
+        FIN_if(hr, -1, client->error = (hr < 0) ? HTTP_STATUS_BAD_REQUEST : hr);
+        if (hname == HN_HOST) {
+            FIN_if(client->request.host, -1, client->error = HTTP_STATUS_BAD_REQUEST); // DUPLICATE-HOST
+            client->request.host = PyUnicode_DecodeUTF8(val, val_len, "ignore");  // as UTF-8
+            FIN_if(!client->request.host, -999, PyErr_Clear());
+        }
+    }
     reset_head_buffer(client);
-    return 0;
+    hr = 0;
+fin:
+    return hr;
 }
 
 int on_headers_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_HEADERS;
+    if (!client->request.host) {
+        LOGe("%s: header HOST not present! => 400", __func__);
+        client->error = HTTP_STATUS_BAD_REQUEST;
+        return -1;  // 400
+    }
     uint64_t clen = parser->content_length;
     LOGi("%s: %s", __func__, (client->request.chunked) ? "(chunked)" : "");
     reset_head_buffer(client);

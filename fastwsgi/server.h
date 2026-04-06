@@ -139,6 +139,7 @@ struct client {
         size_t current_key_len;
         size_t current_val_len;
         PyObject* headers;     // PyDict
+        PyObject* host;        // PyUnicode - value of Host header
         PyObject* wsgi_input_empty;  // empty io.ByteIO object for requests without body
         PyObject* wsgi_input;  // type: io.BytesIO
         int64_t wsgi_input_size;   // total size of wsgi_input PyBytes stream

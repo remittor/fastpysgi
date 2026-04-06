@@ -64,6 +64,7 @@ void close_cb(uv_handle_t * handle)
     LOGn("disconnected =================================");
     pipeline_close(client, false);
     Py_XDECREF(client->request.headers);
+    Py_XDECREF(client->request.host);
     Py_XDECREF(client->request.wsgi_input_empty);
     Py_XDECREF(client->request.wsgi_input);
     xbuf_free(&client->head);
