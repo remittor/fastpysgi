@@ -534,7 +534,14 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         LOGe("Parse error: %s %s\n", llhttp_errno_name(error), client->request.parser.reason);
         err = HTTP_STATUS_BAD_REQUEST;
         err = (client->error >= 400 && client->error < 600) ? client->error : err;
-        err = (error == HPE_INVALID_VERSION && parser->reason && parser->reason[0] == 'I') ? HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED : err;
+        if (error == HPE_INVALID_VERSION && parser->reason) {
+            if (strcmp(parser->reason, "Expected CRLF after version") == 0)
+                err = HTTP_STATUS_BAD_REQUEST;  // 400
+            if (strcmp(parser->reason, "Invalid major version") == 0)
+                err = HTTP_STATUS_BAD_REQUEST;  // 400
+            if (strcmp(parser->reason, "Invalid HTTP version") == 0)
+                err = HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED;  // 505
+        }
         int act = send_fatal(client, err, NULL);
         err = 0;  // skip call send_error
         FIN(act);
