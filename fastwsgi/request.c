@@ -297,6 +297,7 @@ int on_url_complete(llhttp_t * parser)
     LOGi("%s: \"%s\"", __func__, buf->data);
     char * path = buf->data;
     size_t path_len = (size_t)buf->size;
+    FIN_if(memchr(path, '#', path_len), -1, client->error = HTTP_STATUS_BAD_REQUEST);
     char * query = (char *)memchr(path, '?', path_len);
     size_t query_len = 0;
     if (query) {
@@ -310,10 +311,10 @@ int on_url_complete(llhttp_t * parser)
         client->error = HTTP_STATUS_BAD_REQUEST; // 400
         FIN(-1);
     } else {
+        FIN_if(parser->method != HTTP_OPTIONS && memchr(path, '*', path_len), -1, client->error = HTTP_STATUS_BAD_REQUEST);
         hr = set_header(client, g_cv.PATH_INFO, path, path_len, 0);
         LOGc_IF(hr, "%s: malformed PATH = \"%s\"", __func__, path);
         FIN_if(hr, -1, client->error = (hr < 0) ? HTTP_STATUS_BAD_REQUEST : hr);
-        FIN_if(parser->method != HTTP_OPTIONS && memchr(path, '*', path_len), -1, client->error = HTTP_STATUS_BAD_REQUEST);
     }
     if (query_len > 0) {
         hr = set_header(client, g_cv.QUERY_STRING, query, query_len, 0);
