@@ -311,6 +311,7 @@ int on_url_complete(llhttp_t * parser)
         hr = set_header(client, g_cv.PATH_INFO, path, path_len, 0);
         LOGc_IF(hr, "%s: malformed PATH = \"%s\"", __func__, path);
         FIN_if(hr, -1, client->error = (hr < 0) ? HTTP_STATUS_BAD_REQUEST : hr);
+        FIN_if(parser->method != HTTP_OPTIONS && memchr(path, '*', path_len), -1, client->error = HTTP_STATUS_BAD_REQUEST);
     }
     if (query_len > 0) {
         hr = set_header(client, g_cv.QUERY_STRING, query, query_len, 0);
