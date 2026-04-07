@@ -261,6 +261,8 @@ int on_message_begin(llhttp_t * parser)
     client->request.http_content_length = -1; // not specified
     client->request.chunked = 0;
     client->request.expect_continue = 0;
+    client->request.headers_num = 0;
+    Py_CLEAR(client->request.host);
     reset_wsgi_input(client);
     reset_head_buffer(client);
     free_start_response(client);
@@ -330,12 +332,17 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
         return 0;
 
     client_t * client = (client_t *)parser->data;
+    client->request.headers_num++;
     if (parser->http_major != 1 || parser->http_minor != 1) {
         LOGe("%s: recived protocol version = %d.%d (expected: v1.1)", __func__, parser->http_major, parser->http_minor);
         client->error = HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED;
         return -1;  // 505 HTTP Version Not Supported
     }
     LOGd("%s: '%.*s'", __func__, (int)length, data);
+    if (client->request.headers_num >= 10000) {
+        client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
+        return -1;  // 431 Request Header Fields Too Large
+    }
     if (client->head.size + length >= 32*1024) {
         client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
         return -1;  // 431 Request Header Fields Too Large

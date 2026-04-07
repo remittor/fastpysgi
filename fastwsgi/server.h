@@ -138,6 +138,7 @@ struct client {
         int expect_continue;     // 1 = Expect: 100-continue
         size_t current_key_len;
         size_t current_val_len;
+        int headers_num;       // number of headers
         PyObject* headers;     // PyDict
         PyObject* host;        // PyUnicode - value of Host header
         PyObject* wsgi_input_empty;  // empty io.ByteIO object for requests without body
