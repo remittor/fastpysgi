@@ -70,7 +70,6 @@ struct srv {
         int base_handles;  // number of base handles (listen socket + signal)
     } nowait;
     int exit_code;
-    PyObject * ssl_module;
     asyncio_t aio;
     int servers_num;        // number of servers 
     server_t servers[HTTP_SERVERS_MAX];

@@ -2,11 +2,10 @@
 #include "logx.h"
 #include "server.h"
 
-/*
- * Size of a single chunk when reading from MemoryBIO.read() and SSLObject.read().
- * SSLObject.read() returns at most one TLS record per call (no more than 16KB).
- * Use a slightly larger buffer for safety.
- */
+#include <string.h>
+#include <stdlib.h>
+
+// Temporary stack buffer used when draining the write BIO in a loop
 #define TLS_READ_CHUNK  (32 * 1024)
 
 // TLS record content types (RFC 8446 and predecessors)
@@ -40,95 +39,34 @@ PRAGMA_PACK_DEF
  * --------------------------------------------------------------------- */
 
 /*
- * Read all available data from MemoryBIO into xbuf_t.
- * Uses MemoryBIO.read(n) => bytes.
- * Returns total number of bytes read or neg value on error.
+ * Read everything currently in bio_out and append it to `out`.
+ * Returns total bytes appended or neg value on error.
  */
 static
-int bio_drain_to_xbuf(PyObject * bio, xbuf_t * out)
+int bio_drain_to_xbuf(BIO * bio_out, xbuf_t * out)
 {
     int hr = -1;
     int total = 0;
-    PyObject * chunk = NULL;
-    PyObject * read_method = NULL;
-    PyObject * size_arg = NULL;
-
-    read_method = PyObject_GetAttrString(bio, "read");
-    LOGe_IF(!read_method, "%s: failed to get MemoryBIO.read method", __func__);
-    FIN_IF(!read_method, -1);
-    size_arg = PyLong_FromLong(TLS_READ_CHUNK);
-    FIN_IF(!size_arg, -1);
     while (1) {
-        Py_XDECREF(chunk);
-        chunk = PyObject_CallFunctionObjArgs(read_method, size_arg, NULL);
-        LOGe_IF(!chunk, "%s: MemoryBIO.read() returned an error", __func__);
-        FIN_IF(!chunk, -2);
-        if (!PyBytes_Check(chunk)) {
-            LOGe("%s: MemoryBIO.read() returned non-bytes object", __func__);
-            FIN(-3);
-        }
-        Py_ssize_t chunk_size = PyBytes_GET_SIZE(chunk);
-        FIN_IF(chunk_size == 0, 0);  // BIO is empty => all data has been read
-        if (xbuf_add(out, PyBytes_AS_STRING(chunk), chunk_size) < 0) {
-            LOGe("%s: xbuf_add failed (out of memory)", __func__);
-            FIN(-4);
-        }
-        total += (int)chunk_size;
+        long size = BIO_pending(bio_out);
+        LOGe_IF(size < 0, "%s: BIO_pending() returned an error = %d", __func__, (int)size);
+        FIN_IF(size < 0, -2);
+        FIN_IF(size >= INT_MAX / 2, -3);
+        FIN_IF(out->size + size >= INT_MAX / 2, -3);
+        char * chunk = xbuf_expand(out, (size_t)size + 1);
+        LOGe_IF(!chunk, "%s: xbuf_expand failed (out of memory)", __func__);
+        FIN_IF(!chunk, -4);
+        size = (size == 0) ? 1 : size;
+        int rc = g_ssl.BIO_read(bio_out, chunk, (int)size);
+        FIN_IF(rc < 0 && BIO_should_retry(bio_out), 0);  // BIO not ready or empty
+        LOGe_IF(rc < 0, "%s: BIO_read() returned an error = %d", __func__, rc);
+        FIN_IF(rc < 0, -9);
+        FIN_IF(rc == 0, 0);  // EOF: BIO is empty => all data has been read 
+        out->size += rc;
+        total += rc;
     }
 fin:
-    Py_XDECREF(chunk);
-    Py_XDECREF(read_method);
-    Py_XDECREF(size_arg);
     return (hr == 0) ? total : hr;
-}
-
-/*
- * Write data into MemoryBIO using bio.write(data).
- * Returns 0 on success, neg value on error.
- */
-static
-Py_ssize_t bio_write(PyObject * bio, const char * data, Py_ssize_t size)
-{
-    int hr = 0;
-    if (size > 0) {
-        PyObject * pdata = PyBytes_FromStringAndSize(data, size);
-        if (!pdata) {
-            LOGe("%s: PyBytes_FromStringAndSize failed", __func__);
-            return -1;
-        }
-        PyObject * ret = PyObject_CallMethod(bio, "write", "O", pdata);
-        Py_DECREF(pdata);
-        if (!ret) {
-            LOGe("%s: MemoryBIO.write() returned an error", __func__);
-            return -2;
-        }
-        hr = PyLong_AsSsize_t(ret);
-        Py_DECREF(ret);
-    }
-    return hr;
-}
-
-/*
- * Check whether the current Python exception is an instance of the given class.
- * If yes => clear the exception and return -1.
- */
-static
-int check_and_clear_exc(PyObject * exc_class)
-{
-    if (PyErr_Occurred()) {
-        if (PyErr_ExceptionMatches(exc_class)) {
-            PyErr_Clear();
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static
-void pyerr_clear(void)
-{
-    //PyErr_Print();
-    PyErr_Clear();
 }
 
 /* -----------------------------------------------------------------------
@@ -156,16 +94,7 @@ int tls_server_init(int srv_idx)
     int hr = -1700;
     server_t * server = SERVER(srv_idx);
     tls_server_t * stls = &server->tls;
-    
-    PyObject * ssl_mod = NULL;
-    PyObject * ctx = NULL;
-    PyObject * ssl_ctx_class = NULL;
-    PyObject * proto_enum = NULL;
-    PyObject * proto_val = NULL;
-    PyObject * ret = NULL;
 
-    PyObject * load_cert_chain = PyUnicode_FromString("load_cert_chain");
-    PyObject * load_verify_locations = PyUnicode_FromString("load_verify_locations");
     PyObject * paths[3] = { NULL };
     PyObject * certfile = NULL;  // path to PEM certificate file (including chain)
     PyObject * keyfile  = NULL;  // path to PEM private key file (NULL = > same file as certfile)
@@ -189,83 +118,52 @@ int tls_server_init(int srv_idx)
     ca_certs = (!paths[2] || paths[2] == Py_None) ? NULL : paths[2];
     FIN_IF(ca_certs && !PyUnicode_CheckExact(ca_certs), -1709);
 
+    const char * ssl_certfile = PyUnicode_AsUTF8(certfile);
+    const char * ssl_keyfile  = keyfile  ? PyUnicode_AsUTF8(keyfile) : ssl_certfile;
+    const char * ssl_ca_certs = ca_certs ? PyUnicode_AsUTF8(ca_certs) : NULL;
+
+    FIN_IF(ssl_certfile[0] == 0, 0);  // TLS not used => skip
+
     memset(stls, 0, sizeof(*stls));
 
-    ssl_mod = g_srv.ssl_module;
-    if (!ssl_mod) {
-        ssl_mod = PyImport_ImportModule("ssl");
-        LOGe_IF(!ssl_mod, "%s: failed to import ssl module", __func__);
-        FIN_IF(!ssl_mod, -1702);
-        g_srv.ssl_module = ssl_mod;
-    }
+    // Load the OpenSSL shared library (idempotent)
+    rc = ssl_lib_init();
+    LOGe_IF(rc, "%s: ssl_lib_init() failed with error = %d", __func__, rc);
+    FIN_IF(rc, -1710);
 
-    // Create SSLContext with PROTOCOL_TLS_SERVER.
-    // ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    proto_enum = PyObject_GetAttrString(ssl_mod, "PROTOCOL_TLS_SERVER");
-    LOGe_IF(!proto_enum, "%s: ssl.PROTOCOL_TLS_SERVER not found", __func__);
-    FIN_IF(!proto_enum, -1715);
-
-    ssl_ctx_class = PyObject_GetAttrString(ssl_mod, "SSLContext");
-    LOGe_IF(!ssl_ctx_class, "%s: failed to get SSLContext class", __func__);
-    FIN_IF(!ssl_ctx_class, -1720);
-
-    ctx = PyObject_CallFunctionObjArgs(ssl_ctx_class, proto_enum, NULL);
-    LOGe_IF(!ctx, "%s: failed to create ssl.SSLContext", __func__);
-    FIN_IF(!ctx, -1725);
-
+    // Create the server SSL_CTX
+    SSL_CTX * ctx = g_ssl.SSL_CTX_new(g_ssl.TLS_server_method());
+    LOGe_IF(!ctx, "%s: SSL_CTX_new(TLS_server_method) failed", __func__);
+    FIN_IF(!ctx, -1720);
     stls->ctx = ctx;
-    Py_INCREF(ctx);
 
-    // ctx.load_cert_chain(certfile, keyfile)
-    if (keyfile) {
-        //ret = PyObject_CallMethod(ctx, "load_cert_chain", "ss", certfile, keyfile);
-        ret = PyObject_CallMethodObjArgs(ctx, load_cert_chain, certfile, keyfile, NULL);
-    } else {
-        //ret = PyObject_CallMethod(ctx, "load_cert_chain", "s", certfile);
-        ret = PyObject_CallMethodObjArgs(ctx, load_cert_chain, certfile, NULL);
-    }
-    LOGe_IF(!ret, "%s: ctx.load_cert_chain() failed => check certificate and key paths", __func__);
-    FIN_IF(!ret, -1730);
-    Py_CLEAR(ret);
+    // Load certificate chain
+    rc = g_ssl.SSL_CTX_use_certificate_chain_file(ctx, ssl_certfile);
+    LOGe_IF(rc != 1, "%s: failed to load certificate chain from '%s'", __func__, ssl_certfile);
+    FIN_if(rc != 1, -1730, ssl_log_errors("SSL_CTX_load_cert_chain"));
+
+    // Load private key (may be in the same file as the certificate)
+    rc = g_ssl.SSL_CTX_use_PrivateKey_file(ctx, ssl_keyfile, SSL_FILETYPE_PEM);
+    LOGe_IF(rc != 1, "%s: failed to load private key from '%s'", __func__, ssl_keyfile);
+    FIN_if(rc != 1, -1735, ssl_log_errors("SSL_CTX_load_priv_key"));
+
+    // Verify that certificate and key match
+    rc = g_ssl.SSL_CTX_check_private_key(ctx);
+    LOGe_IF(rc != 1, "%s: certificate / private-key mismatch", __func__);
+    FIN_if(rc != 1, -1740, ssl_log_errors("SSL_CTX_check_priv_key"));
 
     // If CA bundle is provided => enable client certificate verification
-    if (ca_certs) {
-        //ret = PyObject_CallMethod(ctx, "load_verify_locations", "s", ca_certs);
-        ret = PyObject_CallMethodObjArgs(ctx, load_verify_locations, ca_certs, NULL);
-        LOGe_IF(!ret, "%s: ctx.load_verify_locations() failed", __func__);
-        FIN_if(!ret, -1750);
-        Py_CLEAR(ret);
-        // ctx.verify_mode = ssl.CERT_REQUIRED
-        PyObject * cert_req = PyObject_GetAttrString(ssl_mod, "CERT_REQUIRED");
-        if (cert_req) {
-            PyObject_SetAttrString(ctx, "verify_mode", cert_req);
-            Py_DECREF(cert_req);
-        }
-    }
-    // Cache frequently used objects for faster access in hot path
-    stls->wrap_bio           = PyObject_GetAttrString(ctx, "wrap_bio");
-    stls->MemoryBIO          = PyObject_GetAttrString(ssl_mod, "MemoryBIO");
-    stls->SSLWantReadError   = PyObject_GetAttrString(ssl_mod, "SSLWantReadError");
-    stls->SSLZeroReturnError = PyObject_GetAttrString(ssl_mod, "SSLZeroReturnError");
-    stls->SSLError           = PyObject_GetAttrString(ssl_mod, "SSLError");
-
-    if (!stls->wrap_bio || !stls->MemoryBIO) {
-        LOGe("%s: failed to fetch ssl module attributes", __func__);
-        FIN(-1770);
-    }
-    if (!stls->SSLWantReadError || !stls->SSLZeroReturnError || !stls->SSLError) {
-        LOGe("%s: failed to fetch ssl module attributes", __func__);
-        FIN(-1771);
+    if (ssl_ca_certs) {
+        rc = g_ssl.SSL_CTX_load_verify_locations(ctx, ssl_ca_certs, NULL);
+        LOGe_IF(rc != 1, "%s: failed to load CA certs from '%s'", __func__, ssl_ca_certs);
+        FIN_if(rc != 1, -1750, ssl_log_errors("SSL_CTX_load_ca"));
+        g_ssl.SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+        LOGn("%s: client certificate verification enabled (CA: %s)", __func__, ssl_ca_certs);
     }
     stls->enabled = 1;
-    LOGn("%s: TLS successfully initialized with certfile = %s", __func__, PyUnicode_AsUTF8(certfile));
+    LOGn("%s: TLS successfully initialized with certfile = %s", __func__, ssl_certfile);
     hr = 1;  // OK
 fin:
-    Py_XDECREF(ctx);
-    Py_XDECREF(ssl_ctx_class);
-    Py_XDECREF(proto_enum);
-    Py_XDECREF(load_cert_chain);
-    Py_XDECREF(load_verify_locations);
     if (hr < 0) {
         PyErr_Format(PyExc_Exception, "TLS initialization error. ErrCode = %d", hr);
         tls_server_free(server);
@@ -279,17 +177,12 @@ void tls_server_free(server_t * server)
         server_t * srv = SERVER(idx);
         if ((server && server == srv) || (server == NULL)) {
             tls_server_t * stls = &srv->tls;
-            Py_CLEAR(stls->SSLError);
-            Py_CLEAR(stls->SSLZeroReturnError);
-            Py_CLEAR(stls->SSLWantReadError);
-            Py_CLEAR(stls->MemoryBIO);
-            Py_CLEAR(stls->wrap_bio);
-            Py_CLEAR(stls->ctx);
+            SSL_CTX_FREE(stls->ctx);
             stls->enabled = 0;
         }
     }
     if (server == NULL) {
-        Py_CLEAR(g_srv.ssl_module);
+        ssl_lib_free();
     }
 }
 
@@ -301,9 +194,9 @@ int tls_client_init(client_t * client, const char * server_hostname)
 {
     int hr = -1;
     int rc;
-    PyObject * bio_in  = NULL;
-    PyObject * bio_out = NULL;
-    PyObject * ssl_obj = NULL;
+    (void)server_hostname;  // server_hostname is unused server-side; kept for API symmetry
+    BIO * bio_in = NULL;
+    BIO * bio_out = NULL;
 
     tls_server_t * stls = &client->server->tls;
     tls_client_t * tls = &client->tls;
@@ -313,42 +206,48 @@ int tls_client_init(client_t * client, const char * server_hostname)
         LOGe("%s: server TLS context is not initialized", __func__);
         return -1;
     }
-    // Create two MemoryBIO objects => incoming and outgoing
-    bio_in = PyObject_CallObject(stls->MemoryBIO, NULL);
-    LOGe_IF(!bio_in, "%s: failed to create incoming MemoryBIO", __func__);
-    FIN_IF(!bio_in, -2);
+    // Create the SSL object from the shared context
+    tls->ssl_obj = g_ssl.SSL_new(stls->ctx);
+    LOGe_IF(!tls->ssl_obj, "%s: SSL_new() failed", __func__);
+    FIN_IF(!tls->ssl_obj, -5);
 
-    bio_out = PyObject_CallObject(stls->MemoryBIO, NULL);
-    LOGe_IF(!bio_out, "%s: failed to create outgoing MemoryBIO", __func__);
-    FIN_IF(!bio_out, -3);
+    // Create two memory BIOs
+    bio_in  = g_ssl.BIO_new(g_ssl.BIO_s_mem());
+    bio_out = g_ssl.BIO_new(g_ssl.BIO_s_mem());
+    LOGe_IF(!bio_in || !bio_out, "%s: BIO_new(mem) failed", __func__);
+    FIN_IF(!bio_in || !bio_out, -6);
 
-    PyObject * srv_side = Py_True;
-    // Create SSLObject via SSLContext.wrap_bio(bio_in, bio_out, server_side=True).
-    if (server_hostname && strlen(server_hostname) > 0) {
-        // The wrap_bio method is stored separately as a bound method
-        ssl_obj = PyObject_CallFunction(stls->wrap_bio, "OOOs", bio_in, bio_out, srv_side, server_hostname);
-    } else {
-        ssl_obj = PyObject_CallFunction(stls->wrap_bio, "OOO", bio_in, bio_out, srv_side);
-    }
-    LOGe_IF(!ssl_obj, "%s: SSLContext.wrap_bio() failed", __func__);
-    FIN_if(!ssl_obj, -5, pyerr_clear());
+    // Since our BIO is non-blocking an empty BIO_read() does not indicate EOF, just that no data is currently available.
+    // The SSL routines should retry the read, which we can achieve by calling BIO_set_retry_read().
+    g_ssl.BIO_set_flags(bio_in, BIO_FLAGS_READ);
+    BIO_set_mem_eof_return(bio_in, -1);   // for non-blocking mode
+    g_ssl.BIO_set_flags(bio_out, BIO_FLAGS_READ);
+    BIO_set_mem_eof_return(bio_out, -1);  // for non-blocking mode
 
-    rc = xbuf_init(&tls->enc_out, NULL, 4 * 1024);
+    // Attach BIOs and put SSL into server (accept) mode.
+    // Keep pointers for BIO_write / BIO_pending / BIO_read.
+    // SSL_set_bio() transfers ownership of both BIOs to ssl.
+    g_ssl.SSL_set_bio(tls->ssl_obj, bio_in, bio_out);
+    tls->bio_in  = bio_in;
+    tls->bio_out = bio_out;
+    bio_in  = NULL;
+    bio_out = NULL;
+    g_ssl.SSL_set_accept_state(tls->ssl_obj);
+
+    rc = xbuf_init(&tls->enc_out, NULL, 16 * 1024 + 64);
     LOGe_IF(rc, "%s: failed to allocate enc_out buffer", __func__);
     FIN_IF(rc, -11);
 
-    rc = xbuf_init(&tls->plain_in, NULL, 4 * 1024);
+    rc = xbuf_init(&tls->plain_in, NULL, 16 * 1024 + 64);
     LOGe_IF(rc, "%s: failed to allocate plain_in buffer", __func__);
     FIN_IF(rc, -12);
 
     tls->enabled = 1;
     hr = 0;
 fin:
-    tls->bio_in  = bio_in;
-    tls->bio_out = bio_out;
-    tls->ssl_obj = ssl_obj;
+    SSL_BIO_FREE(bio_in);
+    SSL_BIO_FREE(bio_out);
     tls->hs_state = TLS_HS_PENDING;
-    tls->hs_readed_bytes = 0;
     if (hr) {
         tls_client_free(client);
     }
@@ -358,12 +257,11 @@ fin:
 void tls_client_free(client_t * client)
 {
     if (1) {
-        Py_CLEAR(client->tls.ssl_obj);
-        Py_CLEAR(client->tls.bio_in);
-        Py_CLEAR(client->tls.bio_out);
+        SSL_FREE(client->tls.ssl_obj);  // SSL_free() turn calls BIO_free() on both BIOs attached via SSL_set_bio()
+        client->tls.bio_in  = NULL;
+        client->tls.bio_out = NULL;
         xbuf_free(&client->tls.enc_out);
         xbuf_free(&client->tls.plain_in);
-        client->tls.hs_readed_bytes = 0;
         client->tls.hs_state = TLS_HS_ERROR;
         client->tls.writing = 0;
     }
@@ -373,16 +271,30 @@ void tls_client_free(client_t * client)
  * Data flow
  * --------------------------------------------------------------------- */
 
-int tls_feed_encrypted(client_t * client, const char * data, Py_ssize_t size)
+int tls_shutdown(SSL * ssl)
+{
+    int rc = g_ssl.SSL_shutdown(ssl);
+    if (rc == 1) return  1;   /* complete */
+    if (rc == 0) return  0;   /* waiting for peer close_notify */
+
+    int err = g_ssl.SSL_get_error(ssl, rc);
+    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+        return 0;
+
+    //ssl_log_errors("ssl_shutdown");
+    return -1;
+}
+
+int tls_feed_encrypted(client_t * client, const char * data, ssize_t size)
 {
     int hr = 0;
     tls_client_t * tls = &client->tls;
     if (tls->bio_in && data && size > 0) {
-        Py_ssize_t wsz = bio_write(tls->bio_in, data, size);
+        int wsz = g_ssl.BIO_write(tls->bio_in, data, size);
         LOGe_IF(wsz < 0, "%s: failed to write data into input BIO", __func__);
         FIN_IF(wsz < 0, (int)wsz);
-        LOGe_IF(wsz != size, "%s: failed to WRITE data into input BIO", __func__);
-        FIN_IF(wsz != size, -9);
+        LOGe_IF(wsz != (int)size, "%s: failed to WRITE data into input BIO", __func__);
+        FIN_IF(wsz != (int)size, -9);
     }
 fin:
     return hr;
@@ -400,22 +312,19 @@ tls_hs_state_t tls_do_handshake(client_t * client)
     if (tls->hs_state == TLS_HS_DONE) {
         return TLS_HS_DONE;
     }
-    // ssl_obj.do_handshake()
-    PyObject * ret = PyObject_CallMethod(tls->ssl_obj, "do_handshake", NULL);
-    if (ret) {
-        Py_DECREF(ret);
+    int rc = g_ssl.SSL_do_handshake(tls->ssl_obj);
+    if (rc == 1) {
         tls->hs_state = TLS_HS_DONE;
         LOGn("%s: TLS handshake successfully completed", __func__);
         return TLS_HS_DONE;
     }
-    // We're still waiting for data from the client - that's normal.
-    if (check_and_clear_exc(stls->SSLWantReadError)) {
+    int err = g_ssl.SSL_get_error(tls->ssl_obj, rc);
+    if (err == SSL_ERROR_WANT_READ) {
+        // Want-read: need more bytes from the client
         tls->hs_state = TLS_HS_PENDING;
         return TLS_HS_PENDING;
     }
-    LOGe("%s: TLS handshake error", __func__);
-    //PyErr_Print();
-    PyErr_Clear();
+    LOGe("%s: TLS handshake failed (rc = %d)", __func__, rc);
     tls->hs_state = TLS_HS_ERROR;
     return TLS_HS_ERROR;
 }
@@ -424,7 +333,6 @@ int tls_read_decrypted(client_t * client)
 {
     int hr = -1;
     int total = 0;
-    PyObject * chunk = NULL;
     tls_server_t * stls = &client->server->tls;
     tls_client_t * tls = &client->tls;
 
@@ -436,46 +344,34 @@ int tls_read_decrypted(client_t * client)
         return 0;  // data cannot be read until the handshake is complete
     }
     while (1) {
-        Py_XDECREF(chunk);
-        // ssl_obj.read(TLS_READ_CHUNK) => bytes
-        // We read in a loop while there is data.
-        chunk = PyObject_CallMethod(tls->ssl_obj, "read", "i", TLS_READ_CHUNK);
-        if (!chunk) {
-            if (check_and_clear_exc(stls->SSLWantReadError)) {
+        char * chunk = xbuf_expand(&tls->plain_in, TLS_READ_CHUNK);
+        LOGe_IF(!chunk, "%s: xbuf_expand failed (out of memory)", __func__);
+        FIN_IF(!chunk, -4);
+        int rc = g_ssl.SSL_read(tls->ssl_obj, chunk, TLS_READ_CHUNK);
+        if (rc <= 0) {
+            int err = g_ssl.SSL_get_error(tls->ssl_obj, rc);
+            if (err == SSL_ERROR_WANT_READ) {
                 // SSLWantReadError => The input BIO is empty, there is no more data
                 FIN(0);
             }
-            if (check_and_clear_exc(stls->SSLZeroReturnError)) {
+            if (err == SSL_ERROR_ZERO_RETURN) {
                 LOGn("%s: received TLS close_notify from client (data size = %d)", __func__, total);
                 tls->close_notify = 1;  // graceful close signal
                 FIN(0);
             }
-            LOGe("%s: error reading from SSLObject", __func__);
-            //PyErr_Print();
-            PyErr_Clear();
-            FIN(-3);
+            LOGe("%s: error reading from SSL_obj (rc = %d, err = %d)", __func__, rc, err);
+            FIN(-5);
         }
-        if (!PyBytes_Check(chunk)) {
-            LOGe("%s: SSLObject.read() returned non-bytes", __func__);
-            FIN(-4);
-        }
-        Py_ssize_t chunk_size = PyBytes_GET_SIZE(chunk);
-        FIN_IF(chunk_size == 0, 0);  // BIO is empty => all data has been read
-        int rc = xbuf_add(&tls->plain_in, PyBytes_AS_STRING(chunk), chunk_size);
-        LOGe_IF(rc <= 0, "%s: xbuf_add failed while accumulating decrypted data (rc = %d) chunk_size = %d", __func__, rc, (int)chunk_size);
-        FIN_IF(rc <= 0, -5);
-        total += (int)chunk_size;
+        tls->plain_in.size += rc;
+        total += rc;
     }
 fin:
-    Py_XDECREF(chunk);
     return (hr == 0) ? total : hr;
 }
 
-int tls_encrypt(client_t * client, const char * data, Py_ssize_t size)
+int tls_encrypt(client_t * client, const char * data, ssize_t size)
 {
     int hr = 0;
-    PyObject * pdata = NULL;
-    PyObject * ret = NULL;
     tls_server_t * stls = &client->server->tls;
     tls_client_t * tls = &client->tls;
 
@@ -486,52 +382,32 @@ int tls_encrypt(client_t * client, const char * data, Py_ssize_t size)
         LOGe("%s: attempt to encrypt before handshake completion", __func__);
         return -1;
     }
-    /*
-     * ssl_obj.write(data) => int (number of bytes written).
-     * SSLObject.write() is not required to write all bytes in one call.
-     * We write in a loop until we've written everything.
-     */
-    Py_ssize_t written = 0;
+    // SSL_write() may not consume all bytes in one call (e.g. when size
+    // exceeds the maximum TLS record size of 16 KiB).  Loop until done.
+    ssize_t written = 0;
     while (written < size) {
-        Py_CLEAR(ret);
-        Py_CLEAR(pdata);
-        pdata = PyBytes_FromStringAndSize(data + written, size - written);
-        LOGe_IF(!pdata, "%s: PyBytes_FromStringAndSize failed", __func__);
-        FIN_IF(!pdata, -3);
-
-        ret = PyObject_CallMethod(tls->ssl_obj, "write", "O", pdata);
-        LOGe_IF(!ret, "%s: SSLObject.write() returned an error", __func__);
-        FIN_if(!ret, -4, pyerr_clear());
-        if (!PyLong_Check(ret)) {
-            LOGe("%s: SSLObject.write() returned non-int", __func__);
-            FIN(-5);
-        }
-        Py_ssize_t nret = (Py_ssize_t)PyLong_AsSsize_t(ret);
-        LOGe_IF(nret <= 0, "%s: SSLObject.write() wrote 0 bytes", __func__);
-        FIN_IF(nret <= 0, -6);
-        written += nret;
+        int chunk_size = (size - written > 16384) ? 16384 : (int)(size - written);
+        int rc = g_ssl.SSL_write(tls->ssl_obj, data + written, chunk_size);
+        LOGe_IF(rc < 0, "%s: SSL_write() returned an error = %d", __func__, rc);
+        FIN_IF(rc < 0, -4);
+        LOGe_IF(rc == 0, "%s: SSL_write() wrote 0 bytes", __func__);
+        FIN_IF(rc == 0, -6);
+        written += rc;
     }
     // upload the encrypted result from bio_out to enc_out
     hr = tls_drain_to_enc_out(client);
 fin:
-    Py_XDECREF(pdata);
-    Py_XDECREF(ret);
     return hr;
 }
 
-Py_ssize_t tls_has_encrypted_output(client_t * client)
+ssize_t tls_has_encrypted_output(client_t * client)
 {
     tls_client_t * tls = &client->tls;
     if (tls->bio_out) {
-        // MemoryBIO.pending => number of bytes available to read
-        PyObject * pending = PyObject_GetAttrString(tls->bio_out, "pending");
-        if (pending) {
-            Py_ssize_t size = PyLong_AsSsize_t(pending);
-            Py_DECREF(pending);
-            return (size < 0) ? 0 : size;
-        }
+        long size = BIO_pending(tls->bio_out);
+        return (size < 0) ? 0 : (ssize_t)size;
     }
-    return -1;
+    return 0;
 }
 
 int tls_drain_to_enc_out(client_t * client)
@@ -627,41 +503,35 @@ int tls_flush_enc_out(client_t * client)
     return 0;
 }
 
-int tls_stream_write(client_t * client)
+int tls_stream_write(client_t * client, int nbufs, int total_size)
 {
+    int hr = CA_SHUTDOWN;
+    xbuf_t plain = { 0 };
+    FIN_IF(nbufs <= 0 || total_size <= 0, CA_OK);
     // Assembling plaintext: headers + body
-    xbuf_t plain;
     xbuf_init(&plain, NULL, 0);
+    char * data = xbuf_resize(&plain, (size_t)total_size, 0);
+    FIN_IF(!data, CA_SHUTDOWN);
     write_req_t * wreq = &client->response.write_req;
-
-    if (client->response.headers_size > 0) {
-        xbuf_add(&plain, client->head.data, client->response.headers_size);
+    for (int idx = 0; idx < nbufs; idx++) {
+        xbuf_add(&plain, wreq->bufs[idx].base, wreq->bufs[idx].len);
     }
-    for (size_t i = 0; i < client->response.body_chunk_num; i++) {
-        Py_ssize_t sz = PyBytes_GET_SIZE(client->response.body[i]);
-        xbuf_add(&plain, PyBytes_AS_STRING(client->response.body[i]), sz);
-    }
-    if (client->response.chunked == 1) {
-        xbuf_add(&plain, "\r\n", 2);
-    }
-    if (plain.size == 0) {
-        xbuf_free(&plain);
-        return CA_OK;
-    }
+    FIN_IF(plain.size == 0, CA_OK);
     LOGd("%s: Encrypting %d bytes", __func__, plain.size);
-    int rc = tls_encrypt(client, plain.data, (Py_ssize_t)plain.size);
+    int rc = tls_encrypt(client, plain.data, plain.size);
     xbuf_free(&plain);
-    if (rc < 0) {
-        LOGe("%s: tls_encrypt failed", __func__);
-        return CA_SHUTDOWN;
-    }
-    stream_read_stop(client);
+    LOGe_IF(rc < 0, "%s: tls_encrypt failed", __func__);
+    FIN_IF(rc < 0, CA_SHUTDOWN);
     wreq->client = client;  // mark that a "logical" writing is in progress
-    if (tls_flush_enc_out(client) < 0) {
+    rc = tls_flush_enc_out(client);
+    if (rc < 0) {
         wreq->client = NULL;
-        return CA_SHUTDOWN;
+        FIN(CA_SHUTDOWN);
     }
-    return CA_OK;
+    hr = CA_OK;
+fin:
+    xbuf_free(&plain);
+    return hr;
 }
 
 static
@@ -679,7 +549,7 @@ ssize_t tls_find_app_pkt(xbuf_t * rbuf)
         if (hdr->content_type == TLS_CONTENT_APPLICATION_DATA) {
             return (ssize_t)((size_t)pos - (size_t)rbuf->data);
         }
-        pos += sizeof(tls_header_t) + hdr->length;
+        pos += sizeof(tls_header_t) + ntohs(hdr->length);
     }
 fin:
     return hr;
@@ -694,13 +564,10 @@ int tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf)
         FIN(CA_CLOSE);
     }
     // We feed encrypted bytes into the incoming BIO
-    int rc = tls_feed_encrypted(client, buf->base, (Py_ssize_t)nread);
+    int rc = tls_feed_encrypted(client, buf->base, nread);
     if (rc < 0) {
         LOGe("%s: error on tls_feed_encrypted (errcode = %d)", __func__, rc);
         FIN(CA_SHUTDOWN);
-    }
-    if (tls->hs_state != TLS_HS_DONE) {
-        tls->hs_readed_bytes += (size_t)nread;
     }
     // The handshake isn't over yet => let's continue it
     if (tls->hs_state != TLS_HS_DONE) {

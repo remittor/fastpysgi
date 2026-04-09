@@ -282,9 +282,6 @@ int stream_write(client_t * client)
      * encrypt it via SSLObject.write() and send the encrypted data 
      * via a separate tls_write_req_t (tls_wreq).
      */
-    if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
-        return tls_stream_write(client);
-    }
     write_req_t * wreq = &client->response.write_req;
     uv_buf_t * buf = wreq->bufs;
     int total_len = 0;
@@ -315,6 +312,9 @@ int stream_write(client_t * client)
         buf++;
         nbufs++;
         total_len += 2;
+    }
+    if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
+        return tls_stream_write(client, nbufs, total_len);
     }
     stream_read_stop(client);
     LOGi("%s: %d bytes", __func__, total_len);
