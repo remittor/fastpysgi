@@ -247,7 +247,7 @@ int on_message_begin(llhttp_t * parser)
         xbuf_init2(&client->head, client->buf_head_prealloc, sizeof(client->buf_head_prealloc));
     //client->request.keep_alive = 0;
     client->error = 0;
-    if (client->response.write_req.client != NULL) {
+    if (client->state == CS_RESP_SEND) {
         client->error = 1;
         LOGc("Received new HTTP request while sending response! Disconnect client!");
         return -1;

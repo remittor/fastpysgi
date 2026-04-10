@@ -100,6 +100,19 @@ typedef enum {
 } load_state_t;
 
 typedef enum {
+    CS_UNKNOWN = 0,
+    CS_ACCEPT,
+    CS_REQ_READ,         // wait and read data from socket
+    CS_REQ_PARSE,
+    CS_APP_CALL,
+    CS_RESP_BILD,
+    CS_RESP_SEND,        // sending data to remote client
+    CS_RESP_SENDED,
+    CS_RESP_END,
+    CS_DESTROY,
+} client_state_t;
+
+typedef enum {
     CA_OK           = 0,  // continue read from socket
     CA_CLOSE        = 1,
     CA_SHUTDOWN     = 2
@@ -107,7 +120,7 @@ typedef enum {
 
 typedef struct {
     uv_write_t req;     // Placement strictly at the beginning of the structure!
-    client_t * client;  // if NULL => not sending
+    client_t * client;
     uv_buf_t   bufs[max_preloaded_body_chunks + 3];
 } write_req_t;
 
@@ -121,6 +134,7 @@ struct client {
         uint64_t total;      // total size of data received from the socket
         rx_status_t status;
     } reader;
+    client_state_t state;    // current client state
     tls_client_t tls;        // TLS client state. Active only if server->tls.enabled != 0
     struct {
         pl_status_t status;  // pipeline status
@@ -130,7 +144,7 @@ struct client {
     } pipeline;
     asgi_t * asgi;       // ASGI 3.0 implementation
     struct {
-        int load_state;
+        int load_state;          // load_state_t
         int64_t http_content_length; // -1 = "Content-Length" not specified
         int chunked;             // Transfer-Encoding: chunked
         int keep_alive;          // 1 = Connection: Keep-Alive or HTTP/1.1
@@ -181,6 +195,7 @@ PyObject * run_server(PyObject * self, PyObject * server);
 PyObject * run_nowait(PyObject * self, PyObject * server);
 PyObject * close_server(PyObject * self, PyObject * server);
 
+const char * get_cstate(int state);
 int x_send_status(client_t * client, int status);
 int stream_write(client_t * client);
 int stream_read_start(client_t * client);
@@ -228,5 +243,10 @@ void update_log_prefix(client_t * client)
 {
     set_log_client_addr(client ? client->remote_addr : NULL);
 }
+
+#define SET_CSTATE(_state_) do { \
+    LOGd("%s: change client state: %s --> %s", __func__, get_cstate(client->state), get_cstate(_state_)); \
+    client->state = _state_; \
+} while(0)
 
 #endif

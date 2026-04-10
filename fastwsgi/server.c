@@ -23,6 +23,23 @@ void idle_worker_cb(uv_idle_t * handle);
 void pipeline_cb(uv_handle_t * handle, void * arg);
 int pipeline_close(client_t * client, bool start_reading);
 
+const char * get_cstate(int state)
+{
+    switch((client_state_t)state) {
+        case CS_UNKNOWN    : return "CS_UNKNOWN";
+        case CS_ACCEPT     : return "CS_ACCEPT";
+        case CS_REQ_READ   : return "CS_REQ_READ";
+        case CS_REQ_PARSE  : return "CS_REQ_PARSE";
+        case CS_APP_CALL   : return "CS_APP_CALL";
+        case CS_RESP_BILD  : return "CS_RESP_BILD";
+        case CS_RESP_SEND  : return "CS_RESP_SEND";
+        case CS_RESP_SENDED: return "CS_RESP_SENDED";
+        case CS_RESP_END   : return "CS_RESP_END";
+        case CS_DESTROY    : return "CS_DESTROY";
+    }
+    return "CS_?????";
+}
+
 void free_read_buffer(client_t * client, void * ptr)
 {
     if (client->reader.status == RXS_ACTIVE) {
@@ -40,19 +57,26 @@ void free_read_buffer(client_t * client, void * ptr)
 int stream_read_start(client_t * client)
 {
     int hr = 0;
-    FIN_IF(client->response.write_req.client, -1);     // writes is active
+    FIN_IF(!client, -1);
     FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
-    uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
-    LOGd("%s: READ ACTIVATED", __func__);
+    FIN_IF(client->state == CS_RESP_SEND, -3);     // uv_write is active
+    SET_CSTATE(CS_REQ_READ);
+    int rc = uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    if (rc != 0 && rc != UV_EALREADY) {
+        LOGe("%s: uv_read_start() return error = %d", __func__, rc);
+        SET_CSTATE(CS_DESTROY);  // maybe UV_ENOTCONN
+        return -7;
+    }
+    LOGt_IF(rc == UV_EALREADY, "%s: (UV_EALREADY)", __func__);
 fin:
-    LOGd_IF(hr, "%s: read not activated (err == %d)", __func__, hr);
+    LOGd_IF(hr, "%s: uv_read not activated (err = %d)", __func__, hr);
     return hr;
 }
 
 int stream_read_stop(client_t * client)
 {
-    LOGd("%s: READ STOPPED", __func__);
     uv_read_stop((uv_stream_t *)client);
+    LOGd("%s: uv_read stop (current state = %s)", __func__, get_cstate(client->state));
     return 0;
 }
 
@@ -80,7 +104,7 @@ void close_cb(uv_handle_t * handle)
 
 void close_connection(client_t * client)
 {
-    LOGd("%s: ....", __func__);
+    SET_CSTATE(CS_DESTROY);
     if (!uv_is_closing((uv_handle_t*)client))
         uv_close((uv_handle_t*)client, close_cb);
 }
@@ -97,6 +121,7 @@ void shutdown_cb(uv_shutdown_t * req, int status)
 
 void shutdown_connection(client_t * client)
 {
+    SET_CSTATE(CS_DESTROY);
     bool enotconn = is_stream_notconn((uv_stream_t *)client);
     if (!enotconn) {
         uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
@@ -119,12 +144,17 @@ typedef struct {
 
 void x_write_cb(uv_write_t * req, int status)
 {
+    write_req_t * wreq = (write_req_t*)req;
+    client_t * client = (client_t *)wreq->client;
     g_srv.num_writes--;
+    update_log_prefix(client);
+    stream_read_start(client);
     free(req);
 }
 
 int x_send_status(client_t * client, int status)
 {
+    int hr = -1;
     const char * status_name = get_http_status_name(status);
     if (!status_name)
         status_name = "_unknown_";
@@ -132,9 +162,12 @@ int x_send_status(client_t * client, int status)
     char hdr_buf[256];
     int len = 0;
     len += sprintf(hdr_buf + len, "HTTP/1.1 %d %s\r\n", status, status_name);
-    //len += sprintf(hdr_buf + len, "Content-Length: 0\r\n");
+    if (status >= 200 && status != 204 && status != 304) {
+        len += sprintf(hdr_buf + len, "Content-Length: 0\r\n");
+    }
     len += sprintf(hdr_buf + len, "\r\n");
-
+    LOGt("%s: HTTP RESPONSE RAW DATA [%d]:\n%s", __func__, len, hdr_buf);
+    x_write_req_t * wreq = NULL;
     if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
         // Encrypt and send via tls_flush_enc_out
         int rc = tls_encrypt(client, hdr_buf, len);
@@ -143,22 +176,31 @@ int x_send_status(client_t * client, int status)
             return -1;
         }
         return tls_flush_enc_out(client);
+    } else {
+        size_t buf_size = sizeof(x_write_req_t) + len + 16;
+        wreq = (x_write_req_t *)malloc(buf_size);
+        memcpy(wreq->data, hdr_buf, len);
+        wreq->buf.len = len;
+        wreq->buf.base = wreq->data;
     }
-    // Unencrypted sending (normal mode)
-    size_t buf_size = sizeof(x_write_req_t) + len + 16;
-    x_write_req_t * wreq = (x_write_req_t *)malloc(buf_size);
-    wreq->client = client;
-    memcpy(wreq->data, hdr_buf, len);
-    wreq->buf.len = len;
-    wreq->buf.base = wreq->data;
-    LOGi("%s: \"%s\"", __func__, wreq->data);
-    uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
+    stream_read_stop(client);
+    SET_CSTATE(CS_RESP_SEND);
     g_srv.num_writes++;
-    return 0;
+    int rc = uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
+    if (rc != 0) {
+        g_srv.num_writes--;
+        LOGe("%s: uv_write returned error = %d (%s)", __func__, rc, uv_strerror(rc));
+        SET_CSTATE(CS_DESTROY);  // critical error
+        FIN(-6);
+    }
+    hr = 0;
+fin:    
+    return hr;
 }
 
 void write_cb(uv_write_t * req, int status)
 {
+    int hr = -1;
     int close_conn = 0;
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
@@ -170,6 +212,7 @@ void write_cb(uv_write_t * req, int status)
         reset_response_preload(client);
         goto fin;
     }
+    SET_CSTATE(CS_RESP_SENDED);
     client->response.body_total_written += client->response.body_preloaded_size;
     reset_response_preload(client);
     if (client->response.chunked == 2) {
@@ -191,6 +234,7 @@ void write_cb(uv_write_t * req, int status)
     if (client->asgi) {
         goto fin;
     }
+    SET_CSTATE(CS_RESP_BILD);
     client->error = 0;
     PyObject * chunk = wsgi_iterator_get_next_chunk(client, 0);
     if (!chunk) {
@@ -204,7 +248,8 @@ void write_cb(uv_write_t * req, int status)
             xbuf_add_str(&client->head, "0\r\n\r\n");
             client->response.headers_size = client->head.size;
             client->response.chunked = 2;            
-            stream_write(client);
+            hr = stream_write(client);  // CS_RESP_SEND
+            FIN_if(hr, -1, status = -1);
             LOGd("%s: end of iterable response body (chunked)", __func__);
             return;
         }
@@ -223,7 +268,8 @@ void write_cb(uv_write_t * req, int status)
     client->response.body[0] = chunk;
     client->response.body_chunk_num = 1;
     client->response.body_preloaded_size = csize;
-    stream_write(client);
+    hr = stream_write(client);  // CS_RESP_SEND
+    FIN_if(hr, -1, status = -1);
     return;
 
 fin:
@@ -234,6 +280,7 @@ fin:
         close_conn = 1;
     }
     if (client->asgi) {
+        SET_CSTATE(CS_RESP_BILD);
         reset_head_buffer(client);
         if (status < 0) {
             // cancel await current app.send()
@@ -251,17 +298,19 @@ fin:
         }
         if (client->asgi->send.latest_chunk) {
             LOGd("%s: ASGI last chunk sended!", __func__);
+            SET_CSTATE(CS_RESP_END);
         } else {
+            SET_CSTATE(CS_RESP_SEND);
             return;  // continue sending chunks 
         }
     }
     if (!close_conn) {
         reset_response_body(client);
-        wreq->client = NULL;  // free write_req
+        SET_CSTATE(CS_RESP_END);
         if (client->asgi) {
             // ASGI hasn't completed yet (asgi_done hasn't been called)
             // stream_read_start will call asgi_done when it's time
-            // Do nothing — asgi_done will take over
+            // Do nothing - asgi_done will take over
         } else {
             // WSGI or ASGI is already completed
             if (client->pipeline.status == PS_RESTING) {
@@ -282,13 +331,16 @@ int stream_write(client_t * client)
      * encrypt it via SSLObject.write() and send the encrypted data 
      * via a separate tls_write_req_t (tls_wreq).
      */
+    int hr = CA_OK;
     write_req_t * wreq = &client->response.write_req;
     uv_buf_t * buf = wreq->bufs;
     int total_len = 0;
     int nbufs = 0;
     if (client->response.headers_size > 0) {
-        if (client->response.headers_size != client->head.size)
+        if (client->response.headers_size != client->head.size) {
+            LOGe("%s: [UB] headers_size != head.size", __func__);
             return CA_OK; // error ???
+        }
         buf->base = client->head.data;
         buf->len = client->head.size;
         buf++;
@@ -315,42 +367,53 @@ int stream_write(client_t * client)
     }
     if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
         return tls_stream_write(client, nbufs, total_len);
+    } else {
+        LOGi("%s: %d bytes", __func__, total_len);
     }
     stream_read_stop(client);
-    LOGi("%s: %d bytes", __func__, total_len);
-    wreq->client = client;
-    uv_write((uv_write_t*)wreq, (uv_stream_t*)client, wreq->bufs, nbufs, write_cb);
+    SET_CSTATE(CS_RESP_SEND);
     g_srv.num_writes++;
-    return CA_OK;
+    int rc = uv_write((uv_write_t*)wreq, (uv_stream_t*)client, wreq->bufs, nbufs, write_cb);
+    if (rc != 0) {
+        g_srv.num_writes--;
+        LOGe("%s: uv_write returned error = %d (%s)", __func__, rc, uv_strerror(rc));
+        SET_CSTATE(CS_DESTROY);
+        FIN(CA_SHUTDOWN);
+    }
+    hr = CA_OK;
+fin:
+    return hr;
 }
 
 int send_fatal(client_t * client, int status, const char* error_string)
 {
-    if (!status)
-        status = HTTP_STATUS_BAD_REQUEST;
-    LOGe("%s: %d", __func__, status);
-    if (client->response.write_req.client == NULL) {
+    if (!status) {
+        status = HTTP_STATUS_BAD_REQUEST;  // 400
+    }
+    LOGe("%s: status = %d", __func__, status);
+    if (client->state != CS_RESP_SEND) {
         int body_size = error_string ? strlen(error_string) : 0;
         build_response(client, 0, status, NULL, error_string, body_size);
-        stream_write(client);
+        stream_write(client);  // CS_RESP_SEND
     }
     return CA_SHUTDOWN;
 }
 
 int send_error(client_t * client, int status, const char* error_string)
 {
-    if (!status)
-        status = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-    LOGe("%s: %d", __func__, status);
-    if (client->response.write_req.client == NULL) {
+    if (!status) {
+        status = HTTP_STATUS_INTERNAL_SERVER_ERROR;  // 500
+    }
+    LOGe("%s: status = %d", __func__, status);
+    if (client->state != CS_RESP_SEND) {
         int flags = (client->request.keep_alive) ? RF_SET_KEEP_ALIVE : 0;
         int body_size = error_string ? strlen(error_string) : 0;
         build_response(client, flags, status, NULL, error_string, body_size);
-        stream_write(client);
+        stream_write(client);  // CS_RESP_SEND
     }
-    if (client->request.keep_alive && g_srv.allow_keepalive)
+    if (client->request.keep_alive && g_srv.allow_keepalive) {
         return CA_OK;
-    
+    }
     return CA_SHUTDOWN;
 }
 
@@ -390,12 +453,12 @@ void pipeline_cb(uv_handle_t * handle, void * arg)
         return;
 
     client_t * client = (client_t *)handle;
-    if (client->response.write_req.client) {
+    if (client->state == CS_RESP_SEND) {
         // do not call read_cb while a write is still in progress
         return;
     }
     if (client->asgi) {
-        // ASGI request is still in progress — do not start processing the next
+        // ASGI request is still in progress - do not start processing the next
         // pipelined request until asgi_done() completes and clears client->asgi.
         // The idle worker will retry on the next event loop tick.
         return;
@@ -410,6 +473,7 @@ void pipeline_cb(uv_handle_t * handle, void * arg)
     buf.base = client->pipeline.buf_pos;
     buf.len = (int)nread;
     LOGi("%s: not parsed data size = %d", __func__, (int)nread);
+    SET_CSTATE(CS_REQ_READ);
     read_cb((uv_stream_t *)client, nread, &buf);
     // continue read master buffer
 }
@@ -494,6 +558,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         LOGt("HTTP REQUEST RAW DATA [%d]:\n%.*s", (int)nread, (int)nread, buf->base);
     }
 
+    SET_CSTATE(CS_REQ_PARSE);
     client->request.parser_locked = true;
     enum llhttp_errno error = llhttp_execute(parser, buf->base, nread);
     if (error == HPE_PAUSED) {
@@ -583,12 +648,17 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
     }
     LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", (long long)client->request.wsgi_input_size);
     if (client->asgi) {
+        SET_CSTATE(CS_APP_CALL);
         err = asgi_call_app(client);
-        if (!err)
+        SET_CSTATE(CS_RESP_BILD);
+        if (!err) {
             stream_read_stop(client);
+        }
         FIN(CA_OK);
     }
+    SET_CSTATE(CS_APP_CALL);
     err = call_wsgi_app(client);
+    SET_CSTATE(CS_RESP_BILD);
     if (err) {
         FIN(CA_OK);
     }
@@ -601,7 +671,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         FIN(CA_OK);
     }
     LOGi("Response created! (len = %d+%lld)", client->head.size, (long long)client->response.body_preloaded_size);
-    hr = stream_write(client);
+    hr = stream_write(client);  // CS_RESP_SEND
 
 fin:
     if (client->tls.close_notify) {
@@ -699,6 +769,8 @@ void connection_cb(uv_stream_t * uvserver, int status)
     client->server = server;
     client->reader.status = RXS_DISABLED;
     client->tls.enabled = server->tls.enabled;
+    client->response.write_req.client = client;
+    client->state = CS_ACCEPT;
 
     uv_tcp_init(g_srv.loop, &client->handle);
     
@@ -720,6 +792,7 @@ void connection_cb(uv_stream_t * uvserver, int status)
 
     int rc = uv_accept(uvserver, (uv_stream_t*)&client->handle);
     if (rc) {
+        SET_CSTATE(CS_DESTROY);
         uv_close((uv_handle_t*)&client->handle, close_cb);
         return;
     }
@@ -746,6 +819,7 @@ void connection_cb(uv_stream_t * uvserver, int status)
         // Initialize TLS for a new connection if enabled.
         if (tls_client_init(client, NULL) != 0) {
             LOGe("%s: tls_client_init failed => closing connection", __func__);
+            SET_CSTATE(CS_DESTROY);
             uv_close((uv_handle_t *)&client->handle, close_cb);
             return;
         }
@@ -753,7 +827,7 @@ void connection_cb(uv_stream_t * uvserver, int status)
     }
     llhttp_init(&client->request.parser, HTTP_REQUEST, &g_srv.parser_settings);
     client->request.parser.data = client;
-    stream_read_start(client);
+    stream_read_start(client);  // CS_REQ_READ
 }
 
 void signal_handler(uv_signal_t * req, int signum)
