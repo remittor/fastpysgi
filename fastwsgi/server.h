@@ -198,9 +198,12 @@ PyObject * close_server(PyObject * self, PyObject * server);
 const char * get_cstate(int state);
 int x_send_status(client_t * client, int status);
 int stream_write(client_t * client);
-int stream_read_start(client_t * client);
-int stream_read_stop(client_t * client);
+int stream_read_start_ex(client_t * client, const char * func);
+int stream_read_stop_ex(client_t * client, const char * func);
 void close_connection(client_t * client);
+
+#define stream_read_start(_client_)  stream_read_start_ex((_client_), __func__)
+#define stream_read_stop(_client_)    stream_read_stop_ex((_client_), __func__)
 
 // ----------- functions from request.c ----------------------------
 
@@ -246,6 +249,11 @@ void update_log_prefix(client_t * client)
 
 #define SET_CSTATE(_state_) do { \
     LOGd("%s: change client state: %s --> %s", __func__, get_cstate(client->state), get_cstate(_state_)); \
+    client->state = _state_; \
+} while(0)
+
+#define SET_CSTATE_FN(_state_, _func_) do { \
+    LOGd("%s: change client state: %s --> %s", _func_, get_cstate(client->state), get_cstate(_state_)); \
     client->state = _state_; \
 } while(0)
 

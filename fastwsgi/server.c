@@ -54,29 +54,31 @@ void free_read_buffer(client_t * client, void * ptr)
     }
 }
 
-int stream_read_start(client_t * client)
+int stream_read_start_ex(client_t * client, const char * func)
 {
     int hr = 0;
+    if (!func) func = __func__;
     FIN_IF(!client, -1);
     FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
     FIN_IF(client->state == CS_RESP_SEND, -3);     // uv_write is active
-    SET_CSTATE(CS_REQ_READ);
+    SET_CSTATE_FN(CS_REQ_READ, func);
     int rc = uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
     if (rc != 0 && rc != UV_EALREADY) {
-        LOGe("%s: uv_read_start() return error = %d", __func__, rc);
-        SET_CSTATE(CS_DESTROY);  // maybe UV_ENOTCONN
+        LOGe("%s: uv_read_start() return error = %d", func, rc);
+        SET_CSTATE_FN(CS_DESTROY, func);  // maybe UV_ENOTCONN
         return -7;
     }
-    LOGt_IF(rc == UV_EALREADY, "%s: (UV_EALREADY)", __func__);
+    LOGt_IF(rc == UV_EALREADY, "%s: (UV_EALREADY)", func);
 fin:
-    LOGd_IF(hr, "%s: uv_read not activated (err = %d)", __func__, hr);
+    LOGd_IF(hr, "%s: uv_read not activated (err = %d)", func, hr);
     return hr;
 }
 
-int stream_read_stop(client_t * client)
+int stream_read_stop_ex(client_t * client, const char * func)
 {
+    if (!func) func = __func__;
     uv_read_stop((uv_stream_t *)client);
-    LOGd("%s: uv_read stop (current state = %s)", __func__, get_cstate(client->state));
+    LOGd("%s: uv_read stop (current state = %s)", func, get_cstate(client->state));
     return 0;
 }
 
