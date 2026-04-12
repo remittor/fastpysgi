@@ -176,11 +176,6 @@ struct client {
         int chunked;    // 1 = chunked sending; 2 = last chunk send
         write_req_t write_req;
     } response;
-    /* A separate write_req for sending TLS-encrypted data via libuv.
-     * Used in parallel with the main response.write_req:
-     * response.write_req — controls the response body logic.
-     * tls_wreq - sends encrypted output during the handshake and when encrypting regular responses. */
-    write_req_t tls_wreq;  // wreq.buf always points to client.tls.enc_out.data
     // preallocated buffers
     char buf_head_prealloc[2*1024];
     char buf_read_prealloc[1];
@@ -229,18 +224,21 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr);
 
 // -----------------------------------------------------------------
 
+static
 inline
 server_t * SERVER(int idx)
 {
     return (server_t *) &g_srv.servers[idx];
 }
 
+static
 inline
 void before_loop_callback(client_t * client)
 {
     g_srv.num_loop_cb++;
 }
 
+static
 inline
 void update_log_prefix(client_t * client)
 {

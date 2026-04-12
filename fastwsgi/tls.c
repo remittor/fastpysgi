@@ -324,7 +324,7 @@ tls_hs_state_t tls_do_handshake(client_t * client)
         tls->hs_state = TLS_HS_PENDING;
         return TLS_HS_PENDING;
     }
-    LOGe("%s: TLS handshake failed (rc = %d)", __func__, rc);
+    LOGe("%s: TLS handshake failed (rc = %d, err = %d)", __func__, rc, err);
     tls->hs_state = TLS_HS_ERROR;
     return TLS_HS_ERROR;
 }
@@ -369,7 +369,7 @@ fin:
     return (hr == 0) ? total : hr;
 }
 
-int tls_encrypt(client_t * client, const char * data, ssize_t size)
+int tls_encrypt(client_t * client, const char * data, ssize_t size, int chunk_idx)
 {
     int hr = 0;
     tls_server_t * stls = &client->server->tls;
@@ -395,7 +395,7 @@ int tls_encrypt(client_t * client, const char * data, ssize_t size)
         written += rc;
     }
     // upload the encrypted result from bio_out to enc_out
-    hr = tls_drain_to_enc_out(client);
+    hr = tls_drain_to_enc_out(client, chunk_idx);
 fin:
     return hr;
 }
@@ -410,11 +410,13 @@ ssize_t tls_has_encrypted_output(client_t * client)
     return 0;
 }
 
-int tls_drain_to_enc_out(client_t * client)
+int tls_drain_to_enc_out(client_t * client, int chunk_idx)
 {
     tls_client_t * tls = &client->tls;
     if (tls->bio_out) {
-        xbuf_reset(&tls->enc_out);
+        if (chunk_idx == 0) {
+            xbuf_reset(&tls->enc_out);
+        }
         int size = bio_drain_to_xbuf(tls->bio_out, &tls->enc_out);
         LOGe_IF(size < 0, "%s: failed to read encrypted data from bio_out", __func__);
         return size;
@@ -426,25 +428,18 @@ int tls_drain_to_enc_out(client_t * client)
  * TLS: sending encrypted data via separate write_req
  * --------------------------------------------------------------------- */
 
-/*
- * TLS write completion callback.
- * Frees tls_wreq and triggers next step if needed.
- */
 void tls_write_cb(uv_write_t * req, int status)
 {
+    int hr = -1;
     write_req_t * wreq = (write_req_t *)req;
     client_t * client = (client_t *)wreq->client;
     g_srv.num_writes--;
+    client->tls.writing = 0;
     before_loop_callback(client);
     update_log_prefix(client);
-
-    wreq->client = NULL;  // mark as free
-    client->tls.writing = 0;
-    
     if (status != 0) {
         LOGe("%s: TLS write error: %s", __func__, uv_strerror(status));
-        close_connection(client);
-        return;
+        FIN(-10);
     }
     if (client->tls.hs_state == TLS_HS_PENDING) {
         LOGd("%s: handshake waiting for client data", __func__);
@@ -452,20 +447,12 @@ void tls_write_cb(uv_write_t * req, int status)
         return;
     }
     // Handshake complete, response data sent.
-    // Let's check if there's more data in enc_out (unlikely, but possible)
     LOGd("%s: TLS write completed successfully", __func__);
-    // we need to reset response.write_req and continue as write_cb:
-    write_req_t * resp_wreq = &client->response.write_req;
-    if (resp_wreq->client == client) {
-        resp_wreq->client = NULL;
-        if (!client->request.keep_alive || !g_srv.allow_keepalive) {
-            close_connection(client);
-            return;
-        }
-        reset_response_body(client);
-        if (client->pipeline.status == PS_RESTING) {
-            stream_read_start(client);
-        }
+    stream_read_start(client);
+    return;  // OK
+fin:
+    if (hr <= 0) {
+        close_connection(client);
     }
 }
 
@@ -479,58 +466,55 @@ int tls_flush_enc_out(client_t * client)
     if (tls->enc_out.size <= 0) {
         return 0;  // nothing to send
     }
-    write_req_t * wreq = &client->tls_wreq;
-    if (wreq->client) {
+    write_req_t * wreq = &client->response.write_req;
+    if (tls->writing || client->state == CS_RESP_SEND) {
         // The previous TLS record hasn't completed yet. This shouldn't happen with proper logic, but let's protect ourselves.
-        LOGw("%s: tls_wreq busy, skipping flush", __func__);
-        return 0;
+        LOGe("%s: uv_write still busy => concurrent TLS flush detected", __func__);
+        return -1;
     }
-    tls->writing = 1;
-    wreq->client = client;
+    wreq->bufs[0].len  = tls->enc_out.size;
     wreq->bufs[0].base = tls->enc_out.data;
-    wreq->bufs[0].len = (unsigned int)tls->enc_out.size;
-
-    stream_read_stop(client);
-
-    int rc = uv_write( (uv_write_t *)wreq, (uv_stream_t *)client, wreq->bufs, 1, tls_write_cb);
+    //stream_read_stop(client);
+    //SET_CSTATE(CS_RESP_SEND);
+    LOGd("%s: [TLS] send %d bytes", __func__, tls->enc_out.size);
+    tls->writing = 1;
+    g_srv.num_writes++;
+    int rc = uv_write((uv_write_t *)wreq, (uv_stream_t *)client, wreq->bufs, 1, tls_write_cb);
     if (rc != 0) {
+        g_srv.num_writes--;
         LOGe("%s: uv_write returned error: %s", __func__, uv_strerror(rc));
-        client->tls_wreq.client = NULL;
         tls->writing = 0;
         return -1;
     }
-    g_srv.num_writes++;
     return 0;
 }
 
-int tls_stream_write(client_t * client, int nbufs, int total_size)
+int tls_data_encode(client_t * client, uv_buf_t * bufs, int nbufs, int total_len)
 {
-    int hr = CA_SHUTDOWN;
-    xbuf_t plain = { 0 };
-    FIN_IF(nbufs <= 0 || total_size <= 0, CA_OK);
-    // Assembling plaintext: headers + body
-    xbuf_init(&plain, NULL, 0);
-    char * data = xbuf_resize(&plain, (size_t)total_size, 0);
-    FIN_IF(!data, CA_SHUTDOWN);
-    write_req_t * wreq = &client->response.write_req;
+    int hr = -1;
+    tls_client_t * tls = &client->tls;
+    FIN_IF(nbufs <= 0 || total_len < 0, -2);
+    FIN_IF(!bufs, -3);
+    FIN_IF(bufs[0].len == 0, -4);
+    xbuf_reset(&tls->enc_out);
+    int data_size = total_len + 512;
+    if (data_size > tls->enc_out.capacity) {
+        char * data = xbuf_resize(&tls->enc_out, data_size, 0);
+        FIN_IF(!data, -5);
+    }
+    LOGd_IF(total_len > 0, "%s: Encrypting %d bytes...", __func__, total_len);
+    LOGd_IF(!total_len, "%s: Encrypting ??? bytes...", __func__);
+    int chunk_idx = -1;
     for (int idx = 0; idx < nbufs; idx++) {
-        xbuf_add(&plain, wreq->bufs[idx].base, wreq->bufs[idx].len);
+        if (bufs[idx].len > 0) {
+            chunk_idx++;
+            int rc = tls_encrypt(client, bufs[idx].base, bufs[idx].len, chunk_idx);
+            LOGe_IF(rc < 0, "%s: tls_encrypt() failed (rc = %d)", __func__, rc);
+            FIN_IF(rc < 0, -10);
+        }
     }
-    FIN_IF(plain.size == 0, CA_OK);
-    LOGd("%s: Encrypting %d bytes", __func__, plain.size);
-    int rc = tls_encrypt(client, plain.data, plain.size);
-    xbuf_free(&plain);
-    LOGe_IF(rc < 0, "%s: tls_encrypt failed", __func__);
-    FIN_IF(rc < 0, CA_SHUTDOWN);
-    wreq->client = client;  // mark that a "logical" writing is in progress
-    rc = tls_flush_enc_out(client);
-    if (rc < 0) {
-        wreq->client = NULL;
-        FIN(CA_SHUTDOWN);
-    }
-    hr = CA_OK;
+    hr = tls->enc_out.size;
 fin:
-    xbuf_free(&plain);
     return hr;
 }
 
@@ -574,7 +558,8 @@ int tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf)
         tls_hs_state_t hs = tls_do_handshake(client);
         // We check whether data has appeared to be sent to the client during the handshake.
         if (tls_has_encrypted_output(client) > 0) {
-            tls_drain_to_enc_out(client);
+            int size = tls_drain_to_enc_out(client, 0);
+            FIN_IF(size <= 0, CA_SHUTDOWN);
             int rc = tls_flush_enc_out(client);
             FIN_IF(rc < 0, CA_SHUTDOWN);
         }

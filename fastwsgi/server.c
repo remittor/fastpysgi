@@ -170,14 +170,19 @@ int x_send_status(client_t * client, int status)
     len += sprintf(hdr_buf + len, "\r\n");
     LOGt("%s: HTTP RESPONSE RAW DATA [%d]:\n%s", __func__, len, hdr_buf);
     x_write_req_t * wreq = NULL;
-    if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
-        // Encrypt and send via tls_flush_enc_out
-        int rc = tls_encrypt(client, hdr_buf, len);
-        if (rc < 0) {
-            LOGe_IF(rc, "%s: tls_encrypt failed", __func__);
-            return -1;
-        }
-        return tls_flush_enc_out(client);
+    if (client->tls.enabled) {
+        uv_buf_t buf;
+        buf.base = hdr_buf;
+        buf.len = len;
+        int rc = tls_data_encode(client, &buf, 1, len);
+        LOGe_IF(rc <= 0, "%s: cannot encrypt output data (rc = %d)", __func__, rc);
+        FIN_IF(rc <= 0, -2);  // critical error
+        size_t buf_size = sizeof(x_write_req_t) + client->tls.enc_out.size + 16;
+        wreq = (x_write_req_t *)malloc(buf_size);
+        memcpy(wreq->data, client->tls.enc_out.data, client->tls.enc_out.size);
+        xbuf_reset(&client->tls.enc_out);
+        wreq->buf.len = client->tls.enc_out.size;
+        wreq->buf.base = wreq->data;
     } else {
         size_t buf_size = sizeof(x_write_req_t) + len + 16;
         wreq = (x_write_req_t *)malloc(buf_size);
@@ -193,6 +198,7 @@ int x_send_status(client_t * client, int status)
         g_srv.num_writes--;
         LOGe("%s: uv_write returned error = %d (%s)", __func__, rc, uv_strerror(rc));
         SET_CSTATE(CS_DESTROY);  // critical error
+        free(wreq);
         FIN(-6);
     }
     hr = 0;
@@ -249,7 +255,7 @@ void write_cb(uv_write_t * req, int status)
             xbuf_reset(&client->head);
             xbuf_add_str(&client->head, "0\r\n\r\n");
             client->response.headers_size = client->head.size;
-            client->response.chunked = 2;            
+            client->response.chunked = 2;
             hr = stream_write(client);  // CS_RESP_SEND
             FIN_if(hr, -1, status = -1);
             LOGd("%s: end of iterable response body (chunked)", __func__);
@@ -328,16 +334,16 @@ fin:
 
 int stream_write(client_t * client)
 {
-    /*
-     * If TLS is active, we collect all plaintext data into a single buffer,
-     * encrypt it via SSLObject.write() and send the encrypted data 
-     * via a separate tls_write_req_t (tls_wreq).
-     */
     int hr = CA_OK;
     write_req_t * wreq = &client->response.write_req;
     uv_buf_t * buf = wreq->bufs;
     int total_len = 0;
     int nbufs = 0;
+    if (client->state == CS_RESP_SEND) {
+        LOGe("%s: [UB] client state cannot equ CS_RESP_SEND !!!", __func__);
+        SET_CSTATE(CS_DESTROY);
+        FIN(CA_SHUTDOWN);
+    }
     if (client->response.headers_size > 0) {
         if (client->response.headers_size != client->head.size) {
             LOGe("%s: [UB] headers_size != head.size", __func__);
@@ -367,8 +373,17 @@ int stream_write(client_t * client)
         nbufs++;
         total_len += 2;
     }
-    if (client->tls.enabled && client->tls.hs_state == TLS_HS_DONE) {
-        return tls_stream_write(client, nbufs, total_len);
+    if (client->tls.enabled) {
+        int rc = tls_data_encode(client, wreq->bufs, nbufs, total_len);
+        if (rc <= 0) {
+            LOGe("%s: cannot encrypt output data (rc = %d)", __func__, rc);
+            SET_CSTATE(CS_DESTROY);
+            FIN(CA_SHUTDOWN);  // critical error
+        }
+        wreq->bufs[0].len  = client->tls.enc_out.size;
+        wreq->bufs[0].base = client->tls.enc_out.data;
+        nbufs = 1;
+        LOGi("%s: %d bytes [TLS] enc_out.size = %d", __func__, total_len, rc);
     } else {
         LOGi("%s: %d bytes", __func__, total_len);
     }
@@ -623,7 +638,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
             buf = NULL;  // block double "free" call for master buffer
             LOGd("%s: PIPELINE deactivated! (partial)", __func__);
             client->request.parser_locked = true;
-            if (err) {            
+            if (err) {
                 int act = send_fatal(client, err, NULL);
                 err = 0;  // skip call send_error
                 FIN(act);

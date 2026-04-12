@@ -142,7 +142,7 @@ int  tls_read_decrypted(client_t * client);
  * data, size - data to encrypt.
  * Returns 0 on success, neg value on error.
  */
-int  tls_encrypt(client_t * client, const char * data, ssize_t size);
+int  tls_encrypt(client_t * client, const char * data, ssize_t size, int chunk_idx);
 
 /*
  * Check for encrypted data available in the outgoing BIO (bio_out).
@@ -155,12 +155,13 @@ ssize_t tls_has_encrypted_output(client_t * client);
  * After this, tls->enc_out.data is ready to be passed to uv_write().
  * Returns number of bytes or neg value on error.
  */
-int  tls_drain_to_enc_out(client_t * client);
+int  tls_drain_to_enc_out(client_t * client, int chunk_idx);
 
 // -----------------------------------------------------------------------------------
 void tls_write_cb(uv_write_t * req, int status);
 int  tls_flush_enc_out(client_t * client);
 int  tls_stream_write(client_t * client, int nbufs, int total_size);
+int  tls_data_encode(client_t * client, uv_buf_t * bufs, int nbufs, int total_len);
 int  tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf);
 
 #endif /* FASTWSGI_TLS_H_ */
