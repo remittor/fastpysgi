@@ -9,6 +9,8 @@ from distutils.core import Extension
 from distutils.command.build_ext import build_ext
 import importlib.util
 
+FASTPYSGI_DEBUG = int(os.environ.get("FASTPYSGI_DEBUG", 0))
+
 setup_libuv_py = os.path.join(os.path.dirname(__file__), "setup_libuv.py")
 spec = importlib.util.spec_from_file_location("setup_libuv", setup_libuv_py)
 setup_libuv = importlib.util.module_from_spec(spec)
@@ -130,22 +132,28 @@ class build_all(build_ext):
                     ext.extra_compile_args += [ '/Zc:forScope', '/Zc:inline', '/fp:precise', '/analyze-' ]
                     ext.extra_compile_args += ["/wd4702"]  # disable unreachable code warning
                 else:
-                    ext.extra_compile_args += [ "-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall" ]
+                    if FASTPYSGI_DEBUG:
+                        ext.extra_compile_args += [ "-O0", "-fsanitize=address", "-fno-omit-frame-pointer" ]
+                    else:
+                        ext.extra_compile_args += [ "-O3", "-fno-strict-aliasing" ]
+                        ext.extra_compile_args += [ "-ffunction-sections", "-fdata-sections" ]
+                    ext.extra_compile_args += [ "-fcommon", "-g", "-Wall" ]
                     ext.extra_compile_args += [ "-Wno-unused-function", "-Wno-unused-variable" ]
                     ext.extra_compile_args += [ "-Wno-unreachable-code" ]  # disable unreachable code warning
-                    ext.extra_compile_args += [ "-ffunction-sections", "-fdata-sections" ]
                     if compiler.startswith("gcc") and compiler_ver_major >= 8:
                         ext.extra_compile_args += [ "-Wno-unused-but-set-variable" ]
                     if compiler.startswith("clang") and compiler_ver_major >= 13:
                         ext.extra_compile_args += [ "-Wno-unused-but-set-variable" ]
                     if compiler.startswith("gcc") and sys.platform.startswith("linux"):
-                        ext.extra_link_args += [ "-Wl,--gc-sections" ]
-                        ext.extra_link_args += [ "-Wl,-O1" ]
+                        if FASTPYSGI_DEBUG:
+                            ext.extra_link_args += [ "-Wl,-O0", "-fsanitize=address" ]
+                        else:
+                            ext.extra_link_args += [ "-Wl,-O1", "-Wl,--gc-sections" ]
                     so_file = self.get_ext_fullpath(ext.name)
         
         build_ext.build_extensions(self)
 
-        if so_file and sys.platform.startswith("linux"):
+        if so_file and sys.platform.startswith("linux") and not FASTPYSGI_DEBUG:
             print(f"Stripping {so_file}")
             subprocess.run( [ "strip", "--strip-unneeded", so_file ], check = True )
 

@@ -108,7 +108,10 @@ def build_libuv(build_ext):
             self.compiler.define_macro('WIN32', 1)
             self.compiler.define_macro('_CRT_SECURE_NO_DEPRECATE', 1)
             self.compiler.define_macro('_CRT_NONSTDC_NO_DEPRECATE', 1)
-            self.compiler.define_macro('_WIN32_WINNT', '0x0600')
+            if sys.version_info <= (3, 8):
+                self.compiler.define_macro('_WIN32_WINNT', '0x0600')
+            else:
+                self.compiler.define_macro('_WIN32_WINNT', '0x0A00')
             self.compiler.add_library('kernel32')
             self.compiler.add_library('advapi32')
             self.compiler.add_library('iphlpapi')

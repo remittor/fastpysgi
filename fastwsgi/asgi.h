@@ -64,6 +64,7 @@ typedef struct {
 
 extern PyTypeObject ASGI_Type;
 
+static
 INLINE
 PyObject * create_asgi(client_t * client)
 {
