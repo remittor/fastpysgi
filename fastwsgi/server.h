@@ -45,8 +45,6 @@ struct srv {
     PyObject * pysrv;  // object fastpysgi.py@_Server
     int num_loop_cb;   // the number of callbacks that were called in one loop cycle
     int num_writes;    // the number of write operations
-    uv_idle_t worker;  // worker for HTTP pipelining
-    int num_pipeline;  // number of active pipelines
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
     PyObject* asgi_app;
@@ -77,17 +75,12 @@ struct srv {
 
 
 typedef enum {
-    RXS_DISABLED  = 0,
-    RXS_RESTBEG   = 1,  // wait first packet
-    RXS_ACTIVE    = 2,  // reading and waiting useful data '\r\n'
-    RXS_FAIL      = 3,
-    RXS_DONE      = 4,  // useful data readed
+    RXS_RESTING = 0,
+    RXS_READING,
+    RXS_FREEZED,        // active only llhttp parser
+    RXS_FAIL,
+    RXS_DONE,
 } rx_status_t;
-
-typedef enum {
-    PS_RESTING    = 0,  // pipeline not used
-    PS_ACTIVE     = 1   // pipeline active for reading from master buffer
-} pl_status_t;
 
 typedef enum {
     LS_WAIT            = 0,
@@ -128,24 +121,21 @@ struct client {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * server;
     char remote_addr[64];
-    xbuf_t rbuf;             // buffer for reading from socket
-    struct {
-        uint64_t pkt;        // total packet count of received from the socket
-        uint64_t total;      // total size of data received from the socket
+    struct {                 // read stream struct
         rx_status_t status;
-    } reader;
+        uint64_t pkt;        // total packet count of received from the socket
+        uint64_t raw_total;  // total size of raw data received from the socket
+        xbuf_t   rawbuf;     // buffer for reading from TCP socket (data = buf_read_prealloc + read_buffer_size + 8)
+        xbuf_t   buf;        // buffer for llhttp parser (data = buf_read_prealloc)
+        uint64_t total;      // total size of data received for llhttp parser
+        int parsed_size;     // size of the data that was processed by the llhttp parser (buf.size = full size planned for parsing)
+    } rx;
     client_state_t state;    // current client state
     tls_client_t tls;        // TLS client state. Active only if server->tls.enabled != 0
-    struct {
-        pl_status_t status;  // pipeline status
-        char * buf_base;     // master buffer with pipeline-requests
-        char * buf_pos;      // parser cursor position (into master buf)
-        char * buf_end;
-    } pipeline;
-    asgi_t * asgi;       // ASGI 3.0 implementation
+    asgi_t * asgi;           // ASGI 3.0 implementation
     struct {
         int load_state;          // load_state_t
-        int64_t http_content_length; // -1 = "Content-Length" not specified
+        int64_t http_content_length; // if -1 => "Content-Length" not specified
         int chunked;             // Transfer-Encoding: chunked
         int keep_alive;          // 1 = Connection: Keep-Alive or HTTP/1.1
         int expect_continue;     // 1 = Expect: 100-continue
@@ -191,6 +181,8 @@ PyObject * run_nowait(PyObject * self, PyObject * server);
 PyObject * close_server(PyObject * self, PyObject * server);
 
 const char * get_cstate(int state);
+const char * get_rxstatus(int status);
+
 int x_send_status(client_t * client, int status);
 int stream_write(client_t * client);
 int stream_read_start_ex(client_t * client, const char * func);
@@ -199,6 +191,8 @@ void close_connection(client_t * client);
 
 #define stream_read_start(_client_)  stream_read_start_ex((_client_), __func__)
 #define stream_read_stop(_client_)    stream_read_stop_ex((_client_), __func__)
+
+void read_rxbuf_after_send(client_t * client, const char * _func);
 
 // ----------- functions from request.c ----------------------------
 

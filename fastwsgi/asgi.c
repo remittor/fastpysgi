@@ -591,7 +591,7 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
     PyObject * future = NULL;
 
     update_log_prefix(client);
-    LOGt("%s: ....", __func__);
+    LOGt("%s: .... client = %p", __func__, client->asgi);
     FIN_IF(!PyDict_Check(dict), -4570005);
     type = PyDict_GetItem(dict, g_cv.type);
     FIN_IF(!type, -4570011);
@@ -735,6 +735,7 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     PyObject * res = NULL;
     update_log_prefix(client);
 
+    LOGt_IF(client, "%s: rx.status = %s, cstate = %s, load_state = %d", __func__, get_rxstatus(client->rx.status), get_cstate(client->state), client->request.load_state);
     res = PyObject_CallMethodObjArgs(future, g_cv.result, NULL);
     if (res == NULL) {
         LOGe("%s: Exception detected", __func__);
@@ -747,15 +748,13 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     hr = 0;
 //fin:
     if (client) {
-        // Clear asgi first so that pipeline_cb (which checks client->asgi) can
-        // proceed to the next pipelined request on the next idle worker tick.
-        client->asgi = NULL;
-        // stream_read_start() has internal guards:
-        //   - returns -1 if write_req is still active (write_cb will handle restart)
-        //   - returns -2 if pipeline is active (idle_worker_cb -> pipeline_cb will handle it,
-        //     and now that client->asgi is NULL, pipeline_cb will no longer block)
-        // In both cases the connection will be correctly resumed by the appropriate callback.
-        stream_read_start(client);
+        client->asgi = NULL;  // equ asgi_free (end of request and response)
+        if (client->rx.status == RXS_FREEZED) {
+            read_rxbuf_after_send(client, __func__);
+            Py_RETURN_NONE;
+        } else {
+            stream_read_start(client);  // continue reading from TCP socket (next request from client)
+        }
     }
     Py_RETURN_NONE;
 }

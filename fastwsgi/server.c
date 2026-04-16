@@ -19,9 +19,17 @@ void alloc_cb(uv_handle_t * handle, size_t suggested_size, uv_buf_t * buf);
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf);
 int stream_write(client_t * client);
 
-void idle_worker_cb(uv_idle_t * handle);
-void pipeline_cb(uv_handle_t * handle, void * arg);
-int pipeline_close(client_t * client, bool start_reading);
+const char * get_rxstatus(int status)
+{
+    switch((rx_status_t)status) {
+        case RXS_RESTING   : return "RXS_RESTING";
+        case RXS_READING   : return "RXS_READING";
+        case RXS_FREEZED   : return "RXS_FREEZED";
+        case RXS_FAIL      : return "RXS_FAIL";
+        case RXS_DONE      : return "RXS_DONE";
+    }
+    return "RXS_?????";
+}
 
 const char * get_cstate(int state)
 {
@@ -40,18 +48,19 @@ const char * get_cstate(int state)
     return "CS_?????";
 }
 
-void free_read_buffer(client_t * client, void * ptr)
+static
+void free_read_buffer(client_t * client)
 {
-    if (client->reader.status == RXS_ACTIVE) {
-        return;  // dont free when wait reading of useful data
-    }
-    xbuf_t * rbuf = &client->rbuf;
-    if (ptr) {
-        //LOGi("%s: free buffer = %p", __func__, ptr);
-        rbuf->size = 0;  // free buffer
-    } else {
-        xbuf_free(rbuf);
-    }
+    //LOGt("%s: free buffer = %p size = %d cap = %d", __func__, rbuf->data, rbuf->size, rbuf->capacity);
+}
+
+static
+void reset_read_buffer(client_t * client, int opt)
+{
+    (void)opt;
+    xbuf_t * buf = &client->rx.buf;
+    LOGt("%s: reset buffer = %p size = %d cap = %d", __func__, buf->data, buf->size, buf->capacity);
+    buf->size = 0;
 }
 
 int stream_read_start_ex(client_t * client, const char * func)
@@ -59,13 +68,14 @@ int stream_read_start_ex(client_t * client, const char * func)
     int hr = 0;
     if (!func) func = __func__;
     FIN_IF(!client, -1);
-    FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
+    FIN_IF(client->rx.status == RXS_FREEZED, -2);
     FIN_IF(client->state == CS_RESP_SEND, -3);     // uv_write is active
     SET_CSTATE_FN(CS_REQ_READ, func);
     int rc = uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
     if (rc != 0 && rc != UV_EALREADY) {
         LOGe("%s: uv_read_start() return error = %d", func, rc);
         SET_CSTATE_FN(CS_DESTROY, func);  // maybe UV_ENOTCONN
+        close_connection(client);
         return -7;
     }
     LOGt_IF(rc == UV_EALREADY, "%s: (UV_EALREADY)", func);
@@ -88,7 +98,6 @@ void close_cb(uv_handle_t * handle)
     before_loop_callback(client);
     update_log_prefix(client);
     LOGn("disconnected =================================");
-    pipeline_close(client, false);
     Py_XDECREF(client->request.headers);
     Py_XDECREF(client->request.host);
     Py_XDECREF(client->request.wsgi_input_empty);
@@ -96,8 +105,8 @@ void close_cb(uv_handle_t * handle)
     xbuf_free(&client->head);
     free_start_response(client);
     reset_response_body(client);
-    client->reader.status = RXS_DISABLED;
-    free_read_buffer(client, NULL);
+    client->rx.status = RXS_RESTING;
+    free_read_buffer(client);
     asgi_free(client);
     tls_client_free(client);
     free(client);
@@ -320,12 +329,14 @@ fin:
             // stream_read_start will call asgi_done when it's time
             // Do nothing - asgi_done will take over
         } else {
-            // WSGI or ASGI is already completed
-            if (client->pipeline.status == PS_RESTING) {
+            // WSGI output stream is already completed
+            if (client->rx.status == RXS_FREEZED) {
+                read_rxbuf_after_send(client, __func__);
+                return;
+            } else {
                 stream_read_start(client);
             }
         }
-        // If the pipeline is active, idle_worker will sort it out itself
     }
     if (close_conn) {
         close_connection(client);
@@ -434,180 +445,132 @@ int send_error(client_t * client, int status, const char* error_string)
     return CA_SHUTDOWN;
 }
 
-int pipeline_close(client_t * client, bool start_reading)
+void read_rxbuf_after_send(client_t * client, const char * _func)
 {
-    if (client->pipeline.buf_base) {
-        free_read_buffer(client, client->pipeline.buf_base);
-        client->pipeline.buf_base = NULL;
-    }
-    client->pipeline.buf_pos = NULL;
-    if (client->pipeline.status == PS_RESTING)
-        return -1;  // pipeline already closed
-
-    g_srv.num_pipeline--;
-    if (g_srv.num_pipeline == 0) {
-        uv_idle_stop(&g_srv.worker);
-    }
-    LOGi("%s: --------- %s", __func__, (g_srv.num_pipeline == 0) ? "LAST" : "");
-    client->pipeline.status = PS_RESTING;
-    if (start_reading) {
-        stream_read_start(client);
-    }
-    return 0;
-}
-
-void idle_worker_cb(uv_idle_t * handle)
-{
-    if (g_srv.num_pipeline == 0)
-        return;
-
-    uv_walk(g_srv.loop, pipeline_cb, NULL);
-}
-
-void pipeline_cb(uv_handle_t * handle, void * arg)
-{
-    if (handle->data != MAGIC_CLIENT)
-        return;
-
-    client_t * client = (client_t *)handle;
-    if (client->state == CS_RESP_SEND) {
-        // do not call read_cb while a write is still in progress
-        return;
-    }
-    if (client->asgi) {
-        // ASGI request is still in progress - do not start processing the next
-        // pipelined request until asgi_done() completes and clears client->asgi.
-        // The idle worker will retry on the next event loop tick.
-        return;
-    }
-    update_log_prefix(client);
-    if (client->pipeline.status == PS_RESTING) {
-        return;
-    }
-    llhttp_resume(&client->request.parser);
-    ssize_t nread = (size_t)client->pipeline.buf_end - (size_t)client->pipeline.buf_pos;
-    uv_buf_t buf;
-    buf.base = client->pipeline.buf_pos;
-    buf.len = (int)nread;
-    LOGi("%s: not parsed data size = %d", __func__, (int)nread);
-    SET_CSTATE(CS_REQ_READ);
-    read_cb((uv_stream_t *)client, nread, &buf);
-    // continue read master buffer
+    ssize_t nread = client->rx.buf.size - client->rx.parsed_size;
+    LOGd("%s: call read_cb(%d, NULL)", _func ? _func : __func__, (int)nread);
+    read_cb((uv_stream_t *)client, nread, NULL);
 }
 
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
 {
     int hr = CA_OK;  // client action
     int err = 0;     // code of HTTP error
-    uv_buf_t uv_buf;
-    uv_buf_t * buf = &uv_buf;
+    uv_buf_t buf = { 0 };  // data for llhttp parser
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
     before_loop_callback(client);
     update_log_prefix(client);
 
-    xbuf_t * rbuf = &client->rbuf;
-    uv_buf.len  = _buf->len;
-    uv_buf.base = _buf->base;
-
     if (nread == 0) {
         LOGd("read_cb: nread = 0");
-        if (client->reader.status == RXS_RESTBEG || client->reader.status == RXS_ACTIVE) {
-            return;  // continue socket reading without any checking
-        }
-        FIN(CA_OK);
+        return;  // continue socket reading without any checking
     }
     if (nread < 0) {
         char err_name[128];
         uv_err_name_r((int)nread, err_name, sizeof(err_name) - 1);
-        LOGd("read_cb: nread = %d  error: %s", (int)nread, err_name);
-        FIN_IF(nread == UV_EOF && client->tls.enabled, CA_SHUTDOWN);  // remote peer disconnected
-        FIN_IF(nread == UV_EOF, CA_CLOSE);  // remote peer disconnected
-        LOGe_IF(nread != UV_ECONNRESET, "%s: Read error: %s", __func__, err_name);
+        LOGd("%s: nread = %d  error: %s", __func__, (int)nread, err_name);
+        FIN_IF(nread == UV_EOF && !client->tls.enabled, CA_CLOSE);  // remote peer disconnected
+        LOGe_IF(nread != UV_ECONNRESET && nread != UV_EOF, "%s: Read error: %s", __func__, err_name);
         FIN(CA_SHUTDOWN);
     }
-    if (client->reader.status == RXS_RESTBEG && client->reader.pkt == 0) {
-        client->reader.status = RXS_ACTIVE;
+    if (_buf == NULL) {
+        // read_cb called from write_cb or asgi_done (after sending response for prev request)
+        // RX buffer contain unparsed HTTP data
+        goto parsing;
     }
-    client->reader.pkt += (client->reader.pkt < ULLONG_MAX) ? 1 : 0;
-    if (client->reader.total < ULLONG_MAX - (uint64_t)nread) {
-        client->reader.total += nread;
-    } else {
-        client->reader.total = ULLONG_MAX;
-    }
-    LOGd("read_cb: [nread = %d]", (int)nread);
-
-    if ((size_t)rbuf->size + (size_t)nread > g_srv.read_buffer_size) {
-        LOGe("%s: [UB] received biggest chunk (SIZE = %d + %d)", __func__, rbuf->size, (int)nread);
-        if (client->reader.status != RXS_DISABLED) {
-            client->reader.status = RXS_FAIL;
-        }
-        FIN(CA_SHUTDOWN);
-    }
-    rbuf->size += (int)nread;
-
-    if (client->reader.status == RXS_ACTIVE && rbuf->size != (int)client->reader.total) {
-        LOGc("%s: [UB] RXS_ACTIVE: size = %d, total = %d", __func__, (int)rbuf->size, (int)client->reader.total);
-        FIN(CA_SHUTDOWN);
-    }
+    client->rx.pkt += (client->rx.pkt < ULLONG_MAX) ? 1 : 0;
+    client->rx.raw_total = (client->rx.raw_total < ULLONG_MAX - (uint64_t)nread) ? client->rx.raw_total + nread : ULLONG_MAX;
+    LOGd("%s: [nread = %d]", __func__, (int)nread);
 
     if (client->tls.enabled) {
+        if ((size_t)client->rx.rawbuf.size + (size_t)nread > g_srv.read_buffer_size) {
+            LOGe("%s: [UB] received biggest chunk (SIZE = %d + %d)", __func__, client->rx.rawbuf.size, (int)nread);
+            client->rx.status = RXS_FAIL;
+            FIN(CA_SHUTDOWN);
+        }
+        client->rx.rawbuf.size += (int)nread;
         // TLS: Processing Encrypted Incoming Data
-        int act = tls_read_cb(client, nread, buf);
-        // Free the original encrypted buffer
-        free_read_buffer(client, _buf->base);
+        int act = CA_SHUTDOWN; // tls_read_cb(client, nread, buf);
+        // reset the original encrypted buffer
+        reset_read_buffer(client, 0);
         if (act == 100 + TLS_HS_PENDING) {
             // No decrypted data - waiting for the next reading
             stream_read_start(client);
             return;
         }
         FIN_IF(act != CA_OK, act);
-        // buf->base already patched !!!
-        // patch nread (decrypted data size)
-        nread = (ssize_t)buf->len;
-        if (nread == 0) {
+        if (client->rx.buf.size == 0) {
             FIN_IF(client->tls.close_notify, CA_CLOSE);
             stream_read_start(client);
-            return;
+            return;  // continue reading from socket
         }
-    }
-    if (g_log_level >= LL_TRACE) {
-        LOGt("HTTP REQUEST RAW DATA [%d]:\n%.*s", (int)nread, (int)nread, buf->base);
+    } else {
+        client->rx.total = client->rx.raw_total;
+        if ((size_t)client->rx.buf.size + (size_t)nread > g_srv.read_buffer_size) {
+            LOGe("%s: [UB] received biggest chunk (SIZE = %d + %d)", __func__, client->rx.buf.size, (int)nread);
+            client->rx.status = RXS_FAIL;
+            FIN(CA_SHUTDOWN);
+        }
+        client->rx.buf.size += (int)nread;
     }
 
+parsing:
+    buf.base = client->rx.buf.data + client->rx.parsed_size;
+    buf.len  = client->rx.buf.size - client->rx.parsed_size;
+    if (g_log_level >= LL_TRACE) {
+        LOGt("HTTP REQUEST RAW DATA [%d]:\n%.*s", (int)buf.len, (int)buf.len, buf.base);
+    }
+    int prev_psize = client->rx.parsed_size;
     SET_CSTATE(CS_REQ_PARSE);
+    llhttp_resume(&client->request.parser);  // reset llhttp error to 0 (for continue parsing)
     client->request.parser_locked = true;
-    enum llhttp_errno error = llhttp_execute(parser, buf->base, nread);
+    enum llhttp_errno error = llhttp_execute(parser, buf.base, buf.len);
+    LOGt("%s: llhttp_execute(%d) ret = %s pos = %d", __func__, (int)buf.len, llhttp_errno_name(error), (int)((size_t)llhttp_get_error_pos(parser) - (size_t)buf.base));
+    int add_psize = 0;
+    if (error == HPE_OK) {
+        add_psize = (int)buf.len;
+        LOGt("%s: ========= HPE_OK: add_psize = %d", __func__, add_psize);
+    }
     if (error == HPE_PAUSED) {
+        // HPE_PAUSED returned only after on_message_complete (request.load_state >= LS_MSG_END)
         char * pos = (char *)llhttp_get_error_pos(parser);
-        if (pos >= buf->base + nread) {
-            if (client->pipeline.status >= PS_ACTIVE) {
-                pipeline_close(client, true);  // master buffer freed
-                buf = NULL;  // block double "free" call for master buffer
-                LOGd("%s: PIPELINE deactivated! (FULL)", __func__);
-            }
-            client->request.parser_locked = false;
-            error = HPE_OK;  // received data fully parsed
+        add_psize = (int)((size_t)pos - (size_t)buf.base);
+        LOGt("%s: ========= HPE_PAUSED: add_psize = %d", __func__, add_psize);
+    }
+    int curr_psize = prev_psize + add_psize;
+    if (error == HPE_PAUSED) {
+        // HPE_PAUSED returned only after on_message_complete (request.load_state >= LS_MSG_END)
+        if (client->request.load_state < LS_MSG_END) {
+            LOGf("%s: llhttp parser return HPE_PAUSED, but load_state < LS_MSG_END");
+            FIN(CA_SHUTDOWN);
         }
-        else {
-            if (client->pipeline.status == PS_RESTING) {
-                client->pipeline.status = PS_ACTIVE;
-                client->pipeline.buf_base = buf->base;
-                client->pipeline.buf_pos = pos;
-                client->pipeline.buf_end = buf->base + nread;
-                LOGi("%s: PIPELINE Activate: pos = %p", __func__, pos);
-                if (g_srv.num_pipeline == 0) {
-                    uv_idle_start(&g_srv.worker, idle_worker_cb);
-                }
-                g_srv.num_pipeline++;
-            }
-            if (g_log_level >= LL_DEBUG) {
-                ssize_t s1 = (size_t)pos - (size_t)client->pipeline.buf_base;
-                ssize_t s2 = (size_t)client->pipeline.buf_end - (size_t)pos;
-                LOGd("%s: pos = %p (%d + %d = %d)", __func__, pos, (int)s1, (int)s2, (int)(s1+s2));
-            }
-            client->pipeline.buf_pos = pos;
-            stream_read_stop(client);
+        if (add_psize > (int)buf.len) {
+            LOGf("%s: [UB] llhttp parser returned incorrect pos on HPE_PAUSED state !!!", __func__);
+            FIN(CA_SHUTDOWN);
+        }
+        if (add_psize <= 0) {
+            LOGf("%s: [UB] incorrect add_psize = %d (buf.len = %d)", __func__, add_psize, (int)buf.len);
+            FIN(CA_SHUTDOWN);
+        }
+        if (curr_psize > client->rx.buf.size) {
+            LOGf("%s: [UB] incorrect parsed_size: %d + %d > %d", __func__, prev_psize, add_psize, client->rx.buf.size);
+            FIN(CA_SHUTDOWN);
+        }
+        client->rx.parsed_size = curr_psize;
+        if (curr_psize == client->rx.buf.size) {
+            LOGd("%s: %s >>> RXS_READING  (rx.buf fully parsed)", __func__, get_rxstatus(client->rx.status));
+            client->rx.status = RXS_READING;  // restore READING mode for continue reading from TCP socket
+            client->request.parser_locked = false;  // unblock llhttp parser state
+            llhttp_reset(&client->request.parser);  // the next portion of data needs to be parsed from scratch
+            stream_read_start(client);
+            error = HPE_OK;  // received rx.buf fully parsed
+        }
+        if (error == HPE_PAUSED && add_psize >= 0) {
+            LOGd("%s: %s >>> RXS_FREEZED  (rx.parsed_size = %d + %d = %d) [%d]", __func__, get_rxstatus(client->rx.status), prev_psize, add_psize, curr_psize, client->rx.buf.size);
+            client->rx.status = RXS_FREEZED;
+            client->request.parser_locked = true;
+            stream_read_stop(client);  // freeze reading from TCP socket (until processing rx.buf)
         }
         error = HPE_OK;
     }
@@ -628,15 +591,19 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         err = 0;  // skip call send_error
         FIN(act);
     }
+    client->rx.parsed_size = curr_psize;
     if (client->request.load_state < LS_MSG_END) {
-        if (client->pipeline.status >= PS_ACTIVE) {
-            if (buf && buf->base + nread < client->pipeline.buf_end) {
-                LOGc("%s: incorrect PIPELINE chunk", __func__);
-                err = HTTP_STATUS_BAD_REQUEST;
-            }
-            pipeline_close(client, true);  // master buffer freed
-            buf = NULL;  // block double "free" call for master buffer
-            LOGd("%s: PIPELINE deactivated! (partial)", __func__);
+        // This code block not used if llhttp_execute returned HPE_PAUSED !!!
+        // Check that the status HPE_OK means that the data transferred to the llhttp parser has been fully processed
+        if (client->rx.parsed_size != client->rx.buf.size) {
+            LOGf("%s: incorrect llhttp state after receivig HPE_OK !!!", __func__);
+            LOGf("%s: ERROR: parsed_size: %d + %d != %d", __func__, prev_psize + (int)buf.len != client->rx.buf.size);
+            FIN(CA_SHUTDOWN);
+        }
+        if (client->rx.status == RXS_FREEZED) {
+            LOGd("%s: RXS_FREEZED ==> RXS_READING  (partial parsing)", __func__);
+            client->rx.status = RXS_READING;
+            stream_read_start(client);  // reqired to read the tail of the request from TCP socket
             client->request.parser_locked = true;
             if (err) {
                 int act = send_fatal(client, err, NULL);
@@ -649,8 +616,8 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
             FIN(CA_OK);
         }
         LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld",
-            (long long)client->request.load_state, (long long)client->request.wsgi_input_size);
-        // continue read from socket (or read from PIPELINE master buffer)
+            (int)client->request.load_state, (long long)client->request.wsgi_input_size);
+        // continue read from socket (or read from rx.buf)
         FIN(CA_OK);
     }
     if (client->request.load_state != LS_OK) {
@@ -667,8 +634,8 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
     if (client->asgi) {
         SET_CSTATE(CS_APP_CALL);
         err = asgi_call_app(client);
-        SET_CSTATE(CS_RESP_BILD);
         if (!err) {
+            SET_CSTATE(CS_RESP_BILD);
             stream_read_stop(client);
         }
         FIN(CA_OK);
@@ -698,8 +665,7 @@ fin:
             hr = CA_CLOSE;
         }
     }
-    if (buf)
-        free_read_buffer(client, buf->base);
+    //reset_read_buffer(client, 0);
 
     if (PyErr_Occurred()) {
         if (err == 0)
@@ -735,41 +701,36 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
     client_t * client = (client_t *)handle;
     update_log_prefix(client);
     const int read_buffer_size = (int)g_srv.read_buffer_size;
-    LOGt("%s: size = %d (suggested = %d)", __func__, read_buffer_size, (int)suggested_size);
+    LOGd("%s: size = %d (suggested = %d)", __func__, read_buffer_size, (int)suggested_size);
     buf->base = NULL;
     buf->len = 0;
-    if (client->pipeline.status >= PS_ACTIVE) {
-        LOGc("%s: __undefined_behavior__ PIPELINE is active", __func__);
-        return;
+    if (client->rx.status == RXS_RESTING || client->rx.status == RXS_DONE) {
+        client->rx.status = RXS_READING;
     }
-    xbuf_t * rbuf = &client->rbuf;
-    if (client->reader.status == RXS_ACTIVE) {
-        if (!rbuf->data) {
-            LOGc("%s: __undefined_behavior__ rbuf not inited!", __func__);
-            return;  // error
-        }
-        if (rbuf->capacity < read_buffer_size) {
-            LOGc("%s: __undefined_behavior__ rbuf with incorrect capacity = %d", __func__, rbuf->capacity);
-            return;  // error
-        }
-        if (rbuf->size == read_buffer_size) {
-            LOGc("%s: __undefined_behavior__ rbuf overflow = %d", __func__, rbuf->size);
-            return;  // error
-        }
-        buf->len = read_buffer_size - rbuf->size;
-        buf->base = rbuf->data + rbuf->size;
-        buf->base[0] = 0;
-        return;  // OK
+    if (client->rx.status != RXS_READING) {
+        LOGc("%s: [UB] read_cb not processed all data! (rx.status = %d)", __func__, (int)client->rx.status);
+        return;  // error
     }
+    xbuf_t * rbuf = &client->rx.buf;
     if (!rbuf->data) {
-        int err = xbuf_init2(rbuf, client->buf_read_prealloc, read_buffer_size + 3);
-        if (err)
-            return;  // error
-        LOGd("%s: alloc new buffer %p (cap = %d) PREALLOC", __func__, rbuf->data, (int)rbuf->capacity);
+        xbuf_init2(rbuf, client->buf_read_prealloc, read_buffer_size + 3);
+        LOGd("%s: prepare rx.buf = %p (cap = %d)", __func__, rbuf->data, (int)rbuf->capacity);
+    }
+    if (client->tls.enabled) {
+        xbuf_t * rawbuf = &client->rx.rawbuf;
+        if (!rawbuf->data) {
+            xbuf_init2(rawbuf, client->buf_read_prealloc + read_buffer_size + 8, read_buffer_size + 3);
+            LOGd("%s: prepare rx.rawbuf = %p (cap = %d)", __func__, rawbuf->data, rawbuf->capacity);
+        }
+        rawbuf->size = 0;  // reset buffer
+        buf->base = rawbuf->data;
+    } else {
+        rbuf->size = 0;   // reset buffer
+        buf->base = rbuf->data;
     }
     buf->len = read_buffer_size;
-    buf->base = rbuf->data;
     buf->base[0] = 0;
+    client->rx.parsed_size = 0;  // reset llhttp parser pos
 }
 
 void connection_cb(uv_stream_t * uvserver, int status)
@@ -782,9 +743,13 @@ void connection_cb(uv_stream_t * uvserver, int status)
     }
     server_t * server = (server_t *)uvserver;
     LOGi("new connection ================================= %s", server->tls.enabled ? "[TLS]" : "");
-    client_t* client = calloc(1, sizeof(client_t) + g_srv.read_buffer_size + 8);
+    size_t client_aux_size = g_srv.read_buffer_size + 8;  // only rx.buf
+    if (server->tls.enabled) {
+        client_aux_size *= 2;  // rx.rawbuf + rx.buf
+    }
+    client_t * client = client = calloc(1, sizeof(client_t) + client_aux_size);
     client->server = server;
-    client->reader.status = RXS_DISABLED;
+    client->rx.status = RXS_RESTING;
     client->tls.enabled = server->tls.enabled;
     client->response.write_req.client = client;
     client->state = CS_ACCEPT;
@@ -915,10 +880,6 @@ int init_srv(void)
         uv_signal_init(g_srv.loop, &g_srv.signal);
         uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
     }
-    if (1) {  // always enable support HTTP pipelining
-        uv_idle_init(g_srv.loop, &g_srv.worker);
-        g_srv.worker.data = NULL;
-    }
     g_srv_inited = 1;
     hr = 0;
 
@@ -927,10 +888,6 @@ fin:
         if (g_srv.signal.signal_cb)
             uv_signal_stop(&g_srv.signal);
 
-        if (g_srv.worker.type == UV_IDLE) {
-            uv_idle_stop(&g_srv.worker);
-            uv_close((uv_handle_t *)&g_srv.worker, NULL);
-        }
         if (hr <= -9 && hr >= -90) {
             for (int idx = 0; idx < g_srv.servers_num; idx++) {
                 uv_close((uv_handle_t *)SERVER(idx), NULL);
@@ -1215,11 +1172,6 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         if (g_srv.signal.signal_cb) {
             uv_signal_stop(&g_srv.signal);
             g_srv.signal.signal_cb = NULL;
-        }
-        if (g_srv.worker.type == UV_IDLE) {
-            uv_idle_stop(&g_srv.worker);
-            uv_close((uv_handle_t *)&g_srv.worker, NULL);
-            uv_run(g_srv.loop, UV_RUN_NOWAIT);
         }
         if (g_srv.aio.asyncio) {
             aio_loop_shutdown(&g_srv.aio);
