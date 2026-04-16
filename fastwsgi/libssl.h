@@ -48,6 +48,42 @@ typedef struct x509_store_ctx_st X509_STORE_CTX;
 #define SSL_ERROR_WANT_ACCEPT       8
 
 /* =========================================================================
+ * SSL_CTX_set_options() options
+ * ========================================================================= */
+
+#define SSL_OP_ALLOW_NO_DHE_KEX                         0x00000400U
+#define SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS              0x00000800U
+#define SSL_OP_NO_QUERY_MTU                             0x00001000U
+#define SSL_OP_COOKIE_EXCHANGE                          0x00002000U
+#define SSL_OP_NO_TICKET                                0x00004000U
+#define SSL_OP_CISCO_ANYCONNECT                         0x00008000U
+#define SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION   0x00010000U
+#define SSL_OP_NO_COMPRESSION                           0x00020000U
+#define SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION        0x00040000U
+#define SSL_OP_NO_ENCRYPT_THEN_MAC                      0x00080000U
+#define SSL_OP_ENABLE_MIDDLEBOX_COMPAT                  0x00100000U
+#define SSL_OP_PRIORITIZE_CHACHA                        0x00200000U
+#define SSL_OP_CIPHER_SERVER_PREFERENCE                 0x00400000U
+#define SSL_OP_TLS_ROLLBACK_BUG                         0x00800000U
+#define SSL_OP_NO_ANTI_REPLAY                           0x01000000U
+#define SSL_OP_NO_SSLv3                                 0x02000000U
+#define SSL_OP_NO_TLSv1                                 0x04000000U
+#define SSL_OP_NO_TLSv1_2                               0x08000000U
+#define SSL_OP_NO_TLSv1_1                               0x10000000U
+#define SSL_OP_NO_TLSv1_3                               0x20000000U
+#define SSL_OP_NO_DTLSv1                                0x04000000U
+#define SSL_OP_NO_DTLSv1_2                              0x08000000U
+#define SSL_OP_NO_SSL_MASK (SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1|SSL_OP_NO_TLSv1_2|SSL_OP_NO_TLSv1_3)
+#define SSL_OP_NO_DTLS_MASK (SSL_OP_NO_DTLSv1|SSL_OP_NO_DTLSv1_2)
+#define SSL_OP_NO_RENEGOTIATION                         0x40000000U
+#define SSL_OP_CRYPTOPRO_TLSEXT_BUG                     0x80000000U
+#define SSL_OP_ALL    (SSL_OP_CRYPTOPRO_TLSEXT_BUG|\
+                       SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS|\
+                       SSL_OP_LEGACY_SERVER_CONNECT|\
+                       SSL_OP_TLSEXT_PADDING|\
+                       SSL_OP_SAFARI_ECDHE_ECDSA_BUG)
+
+/* =========================================================================
  * SSL_CTX_set_verify() mode flags
  * ========================================================================= */
 
@@ -136,13 +172,21 @@ typedef int  (*fn_SSL_CTX_check_private_key)(const SSL_CTX * ctx);
 typedef int  (*fn_SSL_CTX_load_verify_locations)(SSL_CTX * ctx, const char * CAfile, const char * CApath);
 typedef void (*fn_SSL_CTX_set_verify)(SSL_CTX * ctx, int mode, int (*verify_callback)(int, X509_STORE_CTX *));
 
+typedef unsigned long (*fn_SSL_CTX_get_options)(const SSL_CTX * ctx);
+typedef unsigned long (*fn_SSL_get_options)(const SSL * ssl);
+typedef unsigned long (*fn_SSL_CTX_clear_options)(SSL_CTX * ctx, unsigned long op);
+typedef unsigned long (*fn_SSL_clear_options)(SSL * ssl, unsigned long op);
+typedef unsigned long (*fn_SSL_CTX_set_options)(SSL_CTX * ctx, unsigned long op);
+typedef unsigned long (*fn_SSL_set_options)(SSL * ssl, unsigned long op);
+
 typedef SSL * (*fn_SSL_new)(SSL_CTX * ctx);
 typedef void (*fn_SSL_free)(SSL * ssl);
 typedef void (*fn_SSL_set_bio)(SSL * ssl, BIO * rbio, BIO * wbio);
 typedef void (*fn_SSL_set_accept_state)(SSL * ssl);
 typedef int  (*fn_SSL_do_handshake)(SSL * ssl);
 typedef int  (*fn_SSL_read)(SSL * ssl, void * buf, int num);
-typedef int  (*fn_SSL_write)(SSL *ssl, const void * buf, int num);
+typedef int  (*fn_SSL_write)(SSL * ssl, const void * buf, int num);
+typedef int  (*fn_SSL_pending)(SSL * ssl);
 typedef int  (*fn_SSL_get_error)(const SSL * ssl, int ret);
 typedef int  (*fn_SSL_shutdown)(SSL * ssl);
 
@@ -182,6 +226,13 @@ typedef struct {
     fn_SSL_CTX_load_verify_locations       SSL_CTX_load_verify_locations;
     fn_SSL_CTX_set_verify                  SSL_CTX_set_verify;
 
+    fn_SSL_CTX_get_options                 SSL_CTX_get_options;
+    fn_SSL_get_options                     SSL_get_options;
+    fn_SSL_CTX_clear_options               SSL_CTX_clear_options;
+    fn_SSL_clear_options                   SSL_clear_options;
+    fn_SSL_CTX_set_options                 SSL_CTX_set_options;
+    fn_SSL_set_options                     SSL_set_options;
+
     fn_SSL_new                             SSL_new;
     fn_SSL_free                            SSL_free;
     fn_SSL_set_bio                         SSL_set_bio;
@@ -189,6 +240,7 @@ typedef struct {
     fn_SSL_do_handshake                    SSL_do_handshake;
     fn_SSL_read                            SSL_read;
     fn_SSL_write                           SSL_write;
+    fn_SSL_pending                         SSL_pending;
     fn_SSL_get_error                       SSL_get_error;
     fn_SSL_shutdown                        SSL_shutdown;
 
