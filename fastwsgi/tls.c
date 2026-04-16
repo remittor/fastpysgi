@@ -137,6 +137,11 @@ int tls_server_init(int srv_idx)
     FIN_IF(!ctx, -1720);
     stls->ctx = ctx;
 
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv3);
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_CIPHER_SERVER_PREFERENCE);
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_PRIORITIZE_CHACHA);
+
     // Load certificate chain
     rc = g_ssl.SSL_CTX_use_certificate_chain_file(ctx, ssl_certfile);
     LOGe_IF(rc != 1, "%s: failed to load certificate chain from '%s'", __func__, ssl_certfile);
