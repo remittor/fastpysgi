@@ -557,7 +557,11 @@ int on_headers_complete(llhttp_t * parser)
         client->request.http_content_length = clen;
     }
     if (client->request.expect_continue) {
-        x_send_status(client, HTTP_STATUS_CONTINUE);
+        int rc = x_send_status(client, HTTP_STATUS_CONTINUE);
+        if (rc < 0) {
+            client->error = 1;
+            return -1;  // abort parsing
+        }
         client->request.expect_continue = 0;
     }
     return 0;

@@ -155,12 +155,17 @@ typedef struct {
 
 void x_write_cb(uv_write_t * req, int status)
 {
-    write_req_t * wreq = (write_req_t*)req;
+    x_write_req_t * wreq = (x_write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
     g_srv.num_writes--;
     update_log_prefix(client);
-    stream_read_start(client);
     free(req);
+    if (status != 0) {
+        LOGe("%s: write error: %s", __func__, uv_strerror(status));
+        close_connection(client);
+        return;
+    }
+    stream_read_start(client);
 }
 
 int x_send_status(client_t * client, int status)
