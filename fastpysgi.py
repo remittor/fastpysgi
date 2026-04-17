@@ -88,7 +88,6 @@ class _Server():
     def add_bind(self, host = None, port = None, tls = None):
         if not host or not port:
             raise ValueError("Incorrect host or port!")
-        idx = find_bind_by_opt(host, port)
         self.bindlist.append( ( host, port ) )
         if not self.tls_list:
             self.tls_list = [ ]
