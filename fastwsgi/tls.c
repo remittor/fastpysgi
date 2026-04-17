@@ -139,6 +139,9 @@ int tls_server_init(int srv_idx)
 
     g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
     g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv3);
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_TLSv1);  // TLS v1.0
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_TLSv1_1);
+    g_ssl.SSL_CTX_set_options(ctx, SSL_OP_NO_RENEGOTIATION);
     g_ssl.SSL_CTX_set_options(ctx, SSL_OP_CIPHER_SERVER_PREFERENCE);
     g_ssl.SSL_CTX_set_options(ctx, SSL_OP_PRIORITIZE_CHACHA);
 
