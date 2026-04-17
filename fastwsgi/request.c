@@ -63,6 +63,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
             FIN_if(!val_aux, -55, PyErr_Clear());
             hr = PyDict_SetItem(asgi_scope, g_cv.path, val_aux);
             FIN_if(hr, -56, PyErr_Clear());
+            FIN(0);
         } else {
             dict = client->request.headers;
             server_t * server = client->server;
