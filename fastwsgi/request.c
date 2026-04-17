@@ -908,7 +908,7 @@ int build_response(client_t * client, int flags, int status, const void * header
             status = (int)PyLong_AsLong(_status);
         }
     }
-    if (status == 204 || status == 304) {
+    if (status == 204 || status == 304 || client->request.method == HTTP_HEAD) {
         body_size = 0;
         reset_response_body(client);  // forced reset body buffers
     }
