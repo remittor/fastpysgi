@@ -558,6 +558,11 @@ int on_header_value_complete(llhttp_t * parser)
             // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Expect
             return -1;  // critical error
         }
+        if (parser->http_minor == 0) {
+            LOGe("%s: Header \"Expect\" not supported for HTTP/1.0", __func__);
+            client->error = HTTP_STATUS_EXPECTATION_FAILED;  // 417
+            return -1;  // critical error
+        }
         client->request.expect_continue = 1;
         key = NULL;  // hide Expect header
     }
