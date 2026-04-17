@@ -59,15 +59,6 @@ typedef struct {
      * until the write_cb callback is invoked.
      * Uses xbuf_t with dynamic resizing. */
     xbuf_t           enc_out;       // encrypted outgoing buffer
-
-    /* plain_in - accumulates plaintext bytes produced by SSL_read().
-     * We read in a loop (multiple TLS records per call) and store the
-     * result here so the caller gets one contiguous buffer. */
-    xbuf_t           plain_in;      // decrypted incoming buffer
-
-    /* Flag: encrypted buffer is being sent via uv_write().
-     * While a write is in progress, enc_out must not be modified. */
-    int              writing;
 } tls_client_t;
 
 // Server TLS configuration (created once during server initialization)
@@ -118,7 +109,7 @@ void tls_client_free(client_t * client);
  * After calling this, tls_do_handshake() or tls_read_decrypted() must be called.
  * Returns 0 on success, neg value on error.
  */
-int  tls_feed_encrypted(client_t * client, const char * data, ssize_t size);
+int  tls_feed_encrypted(client_t * client, const char * data, int size);
 
 /*
  * Perform one step of the TLS handshake.
@@ -131,9 +122,8 @@ int  tls_feed_encrypted(client_t * client, const char * data, ssize_t size);
 tls_hs_state_t tls_do_handshake(client_t * client);
 
 /*
- * Read decrypted data from SSLObject into tls->plain_in.
- * Returns number of bytes read, 0 if no data available,
- * <0 on error (including graceful close = -2).
+ * Read decrypted data from SSLObject into rx.buf
+ * Returns number of bytes read, 0 if no data available, neg value on error.
  */
 int  tls_read_decrypted(client_t * client);
 
@@ -158,10 +148,8 @@ ssize_t tls_has_encrypted_output(client_t * client);
 int  tls_drain_to_enc_out(client_t * client, int chunk_idx);
 
 // -----------------------------------------------------------------------------------
-void tls_write_cb(uv_write_t * req, int status);
 int  tls_flush_enc_out(client_t * client);
-int  tls_stream_write(client_t * client, int nbufs, int total_size);
 int  tls_data_encode(client_t * client, uv_buf_t * bufs, int nbufs, int total_len);
-int  tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf);
+int  tls_process_rx_data(client_t * client);
 
 #endif /* FASTWSGI_TLS_H_ */

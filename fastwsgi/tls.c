@@ -243,10 +243,6 @@ int tls_client_init(client_t * client, const char * server_hostname)
     LOGe_IF(rc, "%s: failed to allocate enc_out buffer", __func__);
     FIN_IF(rc, -11);
 
-    rc = xbuf_init(&tls->plain_in, NULL, 16 * 1024 + 64);
-    LOGe_IF(rc, "%s: failed to allocate plain_in buffer", __func__);
-    FIN_IF(rc, -12);
-
     tls->enabled = 1;
     hr = 0;
 fin:
@@ -266,9 +262,7 @@ void tls_client_free(client_t * client)
         client->tls.bio_in  = NULL;
         client->tls.bio_out = NULL;
         xbuf_free(&client->tls.enc_out);
-        xbuf_free(&client->tls.plain_in);
         client->tls.hs_state = TLS_HS_ERROR;
-        client->tls.writing = 0;
     }
 }
 
@@ -290,16 +284,16 @@ int tls_shutdown(SSL * ssl)
     return -1;
 }
 
-int tls_feed_encrypted(client_t * client, const char * data, ssize_t size)
+int tls_feed_encrypted(client_t * client, const char * data, int size)
 {
     int hr = 0;
     tls_client_t * tls = &client->tls;
     if (tls->bio_in && data && size > 0) {
-        int wsz = g_ssl.BIO_write(tls->bio_in, data, size);
-        LOGe_IF(wsz < 0, "%s: failed to write data into input BIO", __func__);
-        FIN_IF(wsz < 0, (int)wsz);
-        LOGe_IF(wsz != (int)size, "%s: failed to WRITE data into input BIO", __func__);
-        FIN_IF(wsz != (int)size, -9);
+        int rc = g_ssl.BIO_write(tls->bio_in, data, size);
+        LOGe_IF(rc < 0, "%s: failed to write data into input BIO (rc = %d)", __func__, rc);
+        FIN_IF(rc < 0, rc);
+        LOGe_IF(rc != size, "%s: failed to WRITE data into input BIO", __func__);
+        FIN_IF(rc != size, -9);
     }
 fin:
     return hr;
@@ -307,7 +301,6 @@ fin:
 
 tls_hs_state_t tls_do_handshake(client_t * client)
 {
-    tls_server_t * stls = &client->server->tls;
     tls_client_t * tls = &client->tls;
 
     if (!tls->ssl_obj || tls->hs_state == TLS_HS_ERROR) {
@@ -338,21 +331,20 @@ int tls_read_decrypted(client_t * client)
 {
     int hr = -1;
     int total = 0;
-    tls_server_t * stls = &client->server->tls;
     tls_client_t * tls = &client->tls;
 
     if (!tls->ssl_obj) {
         return -1;
     }
-    xbuf_reset(&tls->plain_in);
     if (tls->hs_state != TLS_HS_DONE) {
         return 0;  // data cannot be read until the handshake is complete
     }
     while (1) {
-        char * chunk = xbuf_expand(&tls->plain_in, TLS_READ_CHUNK);
-        LOGe_IF(!chunk, "%s: xbuf_expand failed (out of memory)", __func__);
-        FIN_IF(!chunk, -4);
-        int rc = g_ssl.SSL_read(tls->ssl_obj, chunk, TLS_READ_CHUNK);
+        char * chunk = client->rx.buf.data + client->rx.buf.size;
+        int chunk_len = client->rx.buf.capacity - client->rx.buf.size;
+        LOGc_IF(chunk_len <= 0, "%s: chunk_len = %d (out of memory)", __func__, chunk_len);
+        FIN_IF(chunk_len <= 0, -4);
+        int rc = g_ssl.SSL_read(tls->ssl_obj, chunk, chunk_len);
         if (rc <= 0) {
             int err = g_ssl.SSL_get_error(tls->ssl_obj, rc);
             if (err == SSL_ERROR_WANT_READ) {
@@ -367,8 +359,9 @@ int tls_read_decrypted(client_t * client)
             LOGe("%s: error reading from SSL_obj (rc = %d, err = %d)", __func__, rc, err);
             FIN(-5);
         }
-        tls->plain_in.size += rc;
+        client->rx.buf.size += rc;
         total += rc;
+        FIN_IF(client->rx.buf.size == client->rx.buf.capacity, 0);  // not enough space
     }
 fin:
     return (hr == 0) ? total : hr;
@@ -377,7 +370,6 @@ fin:
 int tls_encrypt(client_t * client, const char * data, ssize_t size, int chunk_idx)
 {
     int hr = 0;
-    tls_server_t * stls = &client->server->tls;
     tls_client_t * tls = &client->tls;
 
     if (!tls->ssl_obj || size <= 0) {
@@ -433,15 +425,22 @@ int tls_drain_to_enc_out(client_t * client, int chunk_idx)
  * TLS: sending encrypted data via separate write_req
  * --------------------------------------------------------------------- */
 
+typedef struct {
+    uv_write_t req;
+    uv_buf_t   buf;
+    client_t * client;
+    char       data[1];
+} tls_write_req_t;
+
 void tls_write_cb(uv_write_t * req, int status)
 {
     int hr = -1;
-    write_req_t * wreq = (write_req_t *)req;
+    tls_write_req_t * wreq = (tls_write_req_t *)req;
     client_t * client = (client_t *)wreq->client;
     g_srv.num_writes--;
-    client->tls.writing = 0;
     before_loop_callback(client);
     update_log_prefix(client);
+    free(wreq);
     if (status != 0) {
         LOGe("%s: TLS write error: %s", __func__, uv_strerror(status));
         FIN(-10);
@@ -471,24 +470,23 @@ int tls_flush_enc_out(client_t * client)
     if (tls->enc_out.size <= 0) {
         return 0;  // nothing to send
     }
-    write_req_t * wreq = &client->response.write_req;
-    if (tls->writing || client->state == CS_RESP_SEND) {
-        // The previous TLS record hasn't completed yet. This shouldn't happen with proper logic, but let's protect ourselves.
-        LOGe("%s: uv_write still busy => concurrent TLS flush detected", __func__);
+    tls_write_req_t * wreq = (tls_write_req_t *)malloc(sizeof(tls_write_req_t) + tls->enc_out.size);
+    if (!wreq) {
+        LOGc("%s: wreq = NULL (out of memory)", __func__);
         return -1;
     }
-    wreq->bufs[0].len  = tls->enc_out.size;
-    wreq->bufs[0].base = tls->enc_out.data;
-    //stream_read_stop(client);
-    //SET_CSTATE(CS_RESP_SEND);
+    memcpy(wreq->data, tls->enc_out.data, tls->enc_out.size);
+    wreq->buf.base = wreq->data;
+    wreq->buf.len  = tls->enc_out.size;
+    wreq->client = client;
     LOGd("%s: [TLS] send %d bytes", __func__, tls->enc_out.size);
-    tls->writing = 1;
+    xbuf_reset(&tls->enc_out);
     g_srv.num_writes++;
-    int rc = uv_write((uv_write_t *)wreq, (uv_stream_t *)client, wreq->bufs, 1, tls_write_cb);
+    int rc = uv_write((uv_write_t *)wreq, (uv_stream_t *)client, &wreq->buf, 1, tls_write_cb);
     if (rc != 0) {
         g_srv.num_writes--;
         LOGe("%s: uv_write returned error: %s", __func__, uv_strerror(rc));
-        tls->writing = 0;
+        free(wreq);
         return -1;
     }
     return 0;
@@ -544,7 +542,7 @@ fin:
     return hr;
 }
 
-int tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf)
+int tls_process_rx_data(client_t * client)
 {
     int hr = CA_OK;
     tls_client_t * tls = &client->tls;
@@ -552,12 +550,15 @@ int tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf)
     if (client->tls.close_notify) {
         FIN(CA_CLOSE);
     }
+    FIN_IF(client->rx.rawbuf.size <= 0, CA_SHUTDOWN);
+
     // We feed encrypted bytes into the incoming BIO
-    int rc = tls_feed_encrypted(client, buf->base, nread);
-    if (rc < 0) {
-        LOGe("%s: error on tls_feed_encrypted (errcode = %d)", __func__, rc);
-        FIN(CA_SHUTDOWN);
-    }
+    int rc = g_ssl.BIO_write(tls->bio_in, client->rx.rawbuf.data, client->rx.rawbuf.size);
+    LOGe_IF(rc < 0, "%s: failed to write data into input BIO (rc = %d)", __func__, rc);
+    FIN_IF(rc < 0, CA_SHUTDOWN);
+    LOGe_IF(rc != client->rx.rawbuf.size, "%s: failed to WRITE data into input BIO", __func__);
+    FIN_IF(rc != client->rx.rawbuf.size, CA_SHUTDOWN);
+
     // The handshake isn't over yet => let's continue it
     if (tls->hs_state != TLS_HS_DONE) {
         tls_hs_state_t hs = tls_do_handshake(client);
@@ -579,18 +580,33 @@ int tls_read_cb(client_t * client, ssize_t nread, uv_buf_t * buf)
         LOGn("%s: Handshake complete => waiting for HTTP data", __func__);
     }
     // Handshake complete => decrypting data
-    rc = tls_read_decrypted(client);
-    if (rc < 0) {
-        LOGe("%s: decryption error (errcode = %d)", __func__, rc);
-        FIN(CA_CLOSE);
+    int prev_size = client->rx.buf.size;
+    while (1) {
+        char * chunk = client->rx.buf.data + client->rx.buf.size;
+        int chunk_len = client->rx.buf.capacity - client->rx.buf.size;
+        LOGc_IF(chunk_len <= 0, "%s: chunk_len = %d (out of memory)", __func__, chunk_len);
+        FIN_IF(chunk_len <= 0, CA_CLOSE);
+        int rc = g_ssl.SSL_read(tls->ssl_obj, chunk, chunk_len);
+        if (rc <= 0) {
+            int err = g_ssl.SSL_get_error(tls->ssl_obj, rc);
+            if (err == SSL_ERROR_WANT_READ) {
+                // SSLWantReadError => The input BIO is empty, there is no more data
+                break;
+            }
+            if (err == SSL_ERROR_ZERO_RETURN) {
+                LOGn("%s: received TLS close_notify from client (data size = %d)", __func__, client->rx.buf.size - prev_size);
+                tls->close_notify = 1;  // graceful close signal
+                break;
+            }
+            LOGe("%s: error reading from SSL_obj (rc = %d, err = %d)", __func__, rc, err);
+            FIN(CA_CLOSE);
+        }
+        client->rx.buf.size += rc;
+        if (client->rx.buf.size == client->rx.buf.capacity)
+            break;
     }
-    LOGd("%s: [TLS] %d bytes decrypted", __func__, rc);
+    LOGd("%s: [TLS] %d bytes decrypted", __func__, client->rx.buf.size - prev_size);
     hr = CA_OK;
-    // Replace buf with the decrypted data from tls.plain_in
-    // The following code handles this data as with regular plaintext.
-    // plain_in.data is owned by tls - no need to free it with free_read_buffer
-    buf->base = client->tls.plain_in.data;
-    buf->len  = client->tls.plain_in.size;
 fin:
     return hr;
 }

@@ -495,21 +495,30 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
             FIN(CA_SHUTDOWN);
         }
         client->rx.rawbuf.size += (int)nread;
+        if (client->rx.status == RXS_FREEZED) {
+            LOGc("%s: [TLS] rx.status == RXS_FREEZED  ==> [UB]", __func__);
+            FIN(CA_SHUTDOWN);
+        }
+        client->rx.buf.size = 0;  // reset buffer
+        client->rx.parsed_size = 0;
         // TLS: Processing Encrypted Incoming Data
-        int act = CA_SHUTDOWN; // tls_read_cb(client, nread, buf);
-        // reset the original encrypted buffer
-        reset_read_buffer(client, 0);
+        int act = tls_process_rx_data(client);
         if (act == 100 + TLS_HS_PENDING) {
             // No decrypted data - waiting for the next reading
-            stream_read_start(client);
-            return;
-        }
-        FIN_IF(act != CA_OK, act);
-        if (client->rx.buf.size == 0) {
-            FIN_IF(client->tls.close_notify, CA_CLOSE);
+            client->rx.buf.size = 0;
+            client->rx.rawbuf.size = 0; // reset buf - Reason: all raw data was transferred to tls.bio_in
             stream_read_start(client);
             return;  // continue reading from socket
         }
+        FIN_IF(client->tls.close_notify, CA_CLOSE);  // client terminated the TLS connection itself
+        FIN_IF(act != CA_OK, act);  // critical error on tls_process_rx_data
+        client->rx.rawbuf.size = 0; // reset buf - Reason: all raw data was transferred to tls.bio_in
+        if (client->rx.buf.size == 0) {
+            // No decrypted data - waiting for the next reading
+            stream_read_start(client);
+            return;  // continue reading from socket
+        }
+        client->rx.parsed_size = 0;  // fresh data into rx.buf
     } else {
         client->rx.total = client->rx.raw_total;
         if ((size_t)client->rx.buf.size + (size_t)nread > g_srv.read_buffer_size) {
@@ -726,6 +735,11 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
         if (!rawbuf->data) {
             xbuf_init2(rawbuf, client->buf_read_prealloc + read_buffer_size + 8, read_buffer_size + 3);
             LOGd("%s: prepare rx.rawbuf = %p (cap = %d)", __func__, rawbuf->data, rawbuf->capacity);
+        }
+        int bio_in_size = (int)BIO_pending(client->tls.bio_in);
+        if (bio_in_size > read_buffer_size / 2) {
+            LOGc("%s: [TLS] BIO_in_size = %d (rx.buf.cap = %d)", __func__, bio_in_size, read_buffer_size);
+            return; // error
         }
         rawbuf->size = 0;  // reset buffer
         buf->base = rawbuf->data;
