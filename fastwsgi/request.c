@@ -262,6 +262,7 @@ int on_message_begin(llhttp_t * parser)
     client->request.chunked = 0;
     client->request.expect_continue = 0;
     client->request.headers_num = 0;
+    client->request.method = HTTP_PRI;  // unknown req method
     Py_CLEAR(client->request.host);
     reset_wsgi_input(client);
     reset_head_buffer(client);
@@ -272,6 +273,16 @@ int on_message_begin(llhttp_t * parser)
         asgi_init(client);
     }
     return 0;
+}
+
+int on_method_complete(llhttp_t * parser)
+{
+    int hr = 0;
+    client_t * client = (client_t *)parser->data;
+    client->request.method = parser->method;
+    FIN_if(parser->method == HTTP_CONNECT, -1, client->error = HTTP_STATUS_NOT_IMPLEMENTED);  // not supported => 501
+fin:
+    return hr;
 }
 
 int on_url(llhttp_t * parser, const char * data, size_t length)
@@ -326,6 +337,49 @@ fin:
     return hr;
 }
 
+int on_protocol(llhttp_t * parser, const char * data, size_t length)
+{
+    if (length > 0) {
+        client_t * client = (client_t *)parser->data;
+        if (client->head.size + length > 4) {
+            client->error = HTTP_STATUS_BAD_REQUEST;
+            return -1;
+        }
+        xbuf_add(&client->head, data, length);
+    }
+    return 0;
+}
+
+int on_protocol_complete(llhttp_t * parser)
+{
+    client_t * client = (client_t *)parser->data;
+    if (client->head.size <= 0 || client->head.size > 4) {
+        client->error = HTTP_STATUS_BAD_REQUEST; // 400
+        return -1;
+    }
+    if (client->head.data[0] != 'H' || strncmp(client->head.data, "HTTP", 4) != 0) {
+        client->error = HTTP_STATUS_BAD_REQUEST; // 400
+        return -1;
+    }
+    if (parser->type != HTTP_REQUEST) {
+        client->error = HTTP_STATUS_BAD_REQUEST; // 400
+        return -1;
+    }
+    reset_head_buffer(client);
+    return 0;
+}
+
+int on_version_complete(llhttp_t * parser)
+{
+    if (parser->http_major != 1 || parser->http_minor != 1) {
+        client_t * client = (client_t *)parser->data;
+        LOGe("%s: recived protocol version = %d.%d (expected: v1.1)", __func__, parser->http_major, parser->http_minor);
+        client->error = HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED;
+        return -1;  // 505 HTTP Version Not Supported
+    }
+    return 0;
+}
+
 int on_header_field(llhttp_t * parser, const char * data, size_t length)
 {
     LOGd_IF(length == 0, "%s: <empty>", __func__);
@@ -334,11 +388,6 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
 
     client_t * client = (client_t *)parser->data;
     client->request.headers_num++;
-    if (parser->http_major != 1 || parser->http_minor != 1) {
-        LOGe("%s: recived protocol version = %d.%d (expected: v1.1)", __func__, parser->http_major, parser->http_minor);
-        client->error = HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED;
-        return -1;  // 505 HTTP Version Not Supported
-    }
     LOGd("%s: '%.*s'", __func__, (int)length, data);
     if (client->request.headers_num >= 10000) {
         client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
@@ -680,7 +729,6 @@ int on_message_complete(llhttp_t * parser)
     
     const char* method = llhttp_method_name(parser->method);
     set_header(client, g_cv.REQUEST_METHOD, method, -1, 0);
-    FIN_if(parser->method == HTTP_CONNECT, -1, client->error = HTTP_STATUS_NOT_IMPLEMENTED);  // not supported => 501
 
     if (client->remote_addr[0])
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
@@ -694,7 +742,7 @@ int on_message_complete(llhttp_t * parser)
 
     client->request.load_state = LS_OK;
     hr = HPE_PAUSED;
-fin:
+//fin:
     return hr;
 }
 
@@ -1252,8 +1300,12 @@ void configure_parser_settings(llhttp_settings_t * ps)
 {
     llhttp_settings_init(ps);
     ps->on_message_begin = on_message_begin;
+    ps->on_method_complete = on_method_complete;
     ps->on_url = on_url;
     ps->on_url_complete = on_url_complete;
+    ps->on_protocol = on_protocol;
+    ps->on_protocol_complete = on_protocol_complete;
+    ps->on_version_complete = on_version_complete;
     ps->on_header_field = on_header_field;
     ps->on_header_field_complete = on_header_field_complete;
     ps->on_header_value = on_header_value;

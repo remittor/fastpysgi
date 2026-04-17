@@ -139,6 +139,7 @@ struct client {
         int chunked;             // Transfer-Encoding: chunked
         int keep_alive;          // 1 = Connection: Keep-Alive or HTTP/1.1
         int expect_continue;     // 1 = Expect: 100-continue
+        llhttp_method_t method;  // request method
         size_t current_key_len;
         size_t current_val_len;
         int headers_num;       // number of headers
