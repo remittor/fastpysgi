@@ -371,9 +371,9 @@ int on_protocol_complete(llhttp_t * parser)
 
 int on_version_complete(llhttp_t * parser)
 {
-    if (parser->http_major != 1 || parser->http_minor != 1) {
+    if (parser->http_major != 1) {
         client_t * client = (client_t *)parser->data;
-        LOGe("%s: recived protocol version = %d.%d (expected: v1.1)", __func__, parser->http_major, parser->http_minor);
+        LOGe("%s: recived protocol version = %d.%d (expected: v1.x)", __func__, parser->http_major, parser->http_minor);
         client->error = HTTP_STATUS_HTTP_VERSION_NOT_SUPPORTED;
         return -1;  // 505 HTTP Version Not Supported
     }
