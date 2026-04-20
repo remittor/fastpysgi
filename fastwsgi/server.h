@@ -14,7 +14,7 @@ static const size_t MIN_max_chunk_size = 2*1024;
 static const size_t def_max_chunk_size = 256*1024;
 static const size_t MAX_max_chunk_size = 64*1024*1024;
 
-static const int def_max_content_length = 999999999;
+static const int def_max_content_length = 10*1000*1000;  // 10MB
 
 enum {
     MIN_read_buffer_size = 32 * 1024,

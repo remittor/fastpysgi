@@ -28,8 +28,8 @@ class _Server():
         self.allow_keepalive = True
         self.add_header_date = True
         self.add_header_server = "FastPySGI/{}".format(__version__)
-        self.max_content_length = None  # def value: 999999999
-        self.max_chunk_size = None      # def value: 256 KiB
+        self.max_content_length = None  # def value: 10_000_000 bytes (request body size limit)
+        self.max_chunk_size = None      # def value: 256 KiB (WSGI: size of chunk that is used to read the response body of APP)
         self.read_buffer_size = None    # def value: 64 KiB; min value: 32KiB; for TLS connection double size is allocated
         self.tcp_nodelay = 0            # 0 = Nagle's algo enabled; 1 = Nagle's algo disabled;
         self.tcp_keepalive = 0          # -1 = disabled; 0 = system default; 1...N = timeout in seconds
