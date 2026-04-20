@@ -782,7 +782,7 @@ int call_wsgi_app(client_t * client)
 // =================== build response ============================================
 
 int get_info_from_wsgi_response(client_t * client);
-int wsgi_body_pleload(client_t * client, PyObject * wsgi_body);
+int wsgi_body_preload(client_t * client, PyObject * wsgi_body);
 
 int process_wsgi_response(client_t * client)
 {
@@ -842,9 +842,9 @@ int process_wsgi_response(client_t * client)
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
-    err = wsgi_body_pleload(client, wsgi_body);
+    err = wsgi_body_preload(client, wsgi_body);
     if (err < 0) {
-        LOGc("wsgi_body_pleload return error = %d", err);
+        LOGc("wsgi_body_preload return error = %d", err);
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
@@ -901,7 +901,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         Py_ssize_t status_len = 0;
         const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
         FIN_IF(status_len < 3, -2);
-        memcpy(scode, status_code, 4);
+        memcpy(scode, status_code, 3);
         scode[3] = 0;
         status = atoi(scode);
     }
@@ -1163,7 +1163,7 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr)
     return NULL;
 }
 
-int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
+int wsgi_body_preload(client_t * client, PyObject * wsgi_body)
 {
     PyObject** body = client->response.body;
     int64_t wsgi_content_length = client->response.wsgi_content_length;
