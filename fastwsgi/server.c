@@ -1030,6 +1030,9 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
             server->root_path.len = root_path_len;
         }
     }
+    rv = get_obj_attr_int(server, "max_headers_num");
+    g_srv.max_headers_num = (rv > 0) ? (int)rv : 200;
+
     rv = get_obj_attr_int(server, "max_content_length");
     if (rv == LLONG_MIN) {
         rv = get_env_int("FASTPYSGI_MAX_CONTENT_LENGTH");

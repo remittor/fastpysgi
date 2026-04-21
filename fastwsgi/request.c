@@ -388,12 +388,7 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
         return 0;
 
     client_t * client = (client_t *)parser->data;
-    client->request.headers_num++;
     LOGd("%s: '%.*s'", __func__, (int)length, data);
-    if (client->request.headers_num >= 10000) {
-        client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
-        return -1;  // 431 Request Header Fields Too Large
-    }
     if (client->head.size + length >= 32*1024) {
         client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
         return -1;  // 431 Request Header Fields Too Large
@@ -411,6 +406,11 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
 int on_header_field_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
+    client->request.headers_num++;
+    if (client->request.headers_num > g_srv.max_headers_num) {
+        client->error = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
+        return -1;  // 431 Request Header Fields Too Large
+    }
     xbuf_t * buf = &client->head;
     char * data = buf->data;
     ssize_t size = buf->size;

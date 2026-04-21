@@ -57,6 +57,7 @@ struct srv {
     int add_header_server;
     char header_server[80];
     size_t read_buffer_size;
+    int max_headers_num;         // maximum number of headers allowed in requests
     uint64_t max_content_length;
     size_t max_chunk_size;
     int tcp_nodelay;       // 0 = Nagle's algo enabled; 1 = Nagle's algo disabled;
