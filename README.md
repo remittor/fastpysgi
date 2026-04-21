@@ -1,4 +1,4 @@
-<p align="center"><img src="./logo.png"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/remittor/fastpysgi/refs/heads/master/logo.png"></p>
 
 --------------------------------------------------------------------
 [![Pypi](https://img.shields.io/pypi/v/fastpysgi.svg?style=flat)](https://pypi.python.org/pypi/fastpysgi)
@@ -26,7 +26,9 @@ None
 
 ## Performance
 
-FastPySGI is one of the fastest general use WSGI servers out there!
+FastPySGI is one of the fastest general use WSGI/ASGI servers out there!
+
+Benchmark results: [www.http-arena.com/leaderboard](https://www.http-arena.com/leaderboard/#v=h1iso&type=all,engine,infrastructure,production,tuned&lang=Python)
 
 For a comparison against other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
 
@@ -48,9 +50,9 @@ Create a new file `example.py` with the following:
 import fastpysgi
 
 def app(environ, start_response):
-    headers = [('Content-Type', 'text/plain')]
+    headers = [ ('Content-Type', 'text/plain') ]
     start_response('200 OK', headers)
-    return [b'Hello, World!']
+    return [ b'Hello, World!\n' ]
 
 if __name__ == '__main__':
     fastpysgi.run(app, host='0.0.0.0', port=5000)
@@ -79,7 +81,7 @@ app = Flask(__name__)
 
 @app.get('/')
 def hello_world():
-    return 'Hello, World!', 200
+    return 'Hello, World!\n', 200
 
 if __name__ == '__main__':
     fastpysgi.run(app, host='127.0.0.1', port=5000)
@@ -90,13 +92,14 @@ if __name__ == '__main__':
 
 ```python
 import fastpysgi
-import fastapi
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 
-app = fastapi.FastAPI()
+app = FastAPI()
 
 @app.get("/")
 async def hello_world():
-    return fastapi.responses.PlainTextResponse(b"Hello, World!\n")
+    return PlainTextResponse(b"Hello, World!\n")
 
 if __name__ == '__main__':
     fastpysgi.run(app, host='127.0.0.1', port=5000)
@@ -110,3 +113,5 @@ To run the test suite using [pytest](https://docs.pytest.org/en/latest/getting-s
 ```bash
 python3 -m pytest
 ```
+
+Results of testing for compliance with HTTP/1.x standards: https://www.http-probe.com/probe-results/
