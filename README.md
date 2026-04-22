@@ -3,7 +3,10 @@
 --------------------------------------------------------------------
 [![Pypi](https://img.shields.io/pypi/v/fastpysgi.svg?style=flat)](https://pypi.python.org/pypi/fastpysgi)
 [![Python 3.8-3.14](https://img.shields.io/badge/python-3.8%20%7C%203.14-blue?style=flat)](https://pypi.python.org/pypi/fastpysgi)
-
+[![Github All Releases](https://img.shields.io/github/downloads/remittor/fastpysgi/total.svg)](https://github.com/remittor/fastpysgi/releases)
+[![Github Latest Release](https://img.shields.io/github/downloads/remittor/fastpysgi/latest/total.svg)](https://github.com/remittor/fastpysgi/releases)
+[![ViewCount](https://views.whatilearened.today/views/github/remittor/fastpysgi.svg)](https://github.com/remittor/fastpysgi)
+[![Donations Page](https://github.com/andry81-cache/gh-content-static-cache/raw/master/common/badges/donate/donate.svg)](https://github.com/remittor/donate)
 
 # FastPySGI
 
