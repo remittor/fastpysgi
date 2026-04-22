@@ -240,6 +240,7 @@ void write_cb(uv_write_t * req, int status)
     reset_response_preload(client);
     if (client->response.chunked == 2) {
         LOGd("%s: last chunk sended!", __func__);
+        client->response.last_chunk_time = UV_NOW;
         goto fin;
     }
     if (client->response.chunked == 0) {
@@ -251,6 +252,7 @@ void write_cb(uv_write_t * req, int status)
         }
         if (client->response.body_total_written == body_total_size) {
             LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, (long long)body_total_size);
+            client->response.last_chunk_time = UV_NOW;
             goto fin;
         }
     }
@@ -321,6 +323,7 @@ fin:
         }
         if (client->asgi->send.latest_chunk) {
             LOGd("%s: ASGI last chunk sended!", __func__);
+            client->response.last_chunk_time = UV_NOW;
             SET_CSTATE(CS_RESP_END);
         } else {
             SET_CSTATE(CS_RESP_SEND);
@@ -479,6 +482,9 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * _buf)
         FIN_IF(nread == UV_EOF && !client->tls.enabled, CA_CLOSE);  // remote peer disconnected
         LOGe_IF(nread != UV_ECONNRESET && nread != UV_EOF, "%s: Read error: %s", __func__, err_name);
         FIN(CA_SHUTDOWN);
+    }
+    if (client->request.start_time) {
+        client->request.update_time = UV_NOW;  // update the time even after calling from read_rxbuf_after_send (write_cb)
     }
     if (_buf == NULL) {
         // read_cb called from write_cb or asgi_done (after sending response for prev request)
@@ -829,7 +835,50 @@ void connection_cb(uv_stream_t * uvserver, int status)
     }
     llhttp_init(&client->request.parser, HTTP_REQUEST, &g_srv.parser_settings);
     client->request.parser.data = client;
+    client->request.start_time = UV_NOW;
+    client->request.update_time = UV_NOW;
     stream_read_start(client);  // CS_REQ_READ
+}
+
+void client_aux_check(uv_handle_t * handle, void * arg)
+{
+    if (handle->data != MAGIC_CLIENT) {
+        return;  // skip non clients handles
+    }
+    client_t * client = (client_t *)handle;
+    uint64_t now = UV_NOW;  // equ uv_now()
+    if (g_srv.read_req_timeout && client->request.update_time) {
+        if (now > client->request.update_time + g_srv.read_req_timeout) {
+            update_log_prefix(client);
+            LOGi("%s: waiting next chunk of current request TIMED OUT => conn shutdown", __func__);
+            goto shutdown;
+        }
+    }
+    if (g_srv.curr_req_timeout && client->request.start_time) {
+        if (now > client->request.start_time + g_srv.curr_req_timeout) {
+            update_log_prefix(client);
+            LOGi("%s: waiting to receive the current request TIMED OUT => conn shutdown", __func__);
+            goto shutdown;
+        }
+    }
+    if (g_srv.next_req_timeout && client->response.last_chunk_time) {
+        if (now > client->response.last_chunk_time + g_srv.next_req_timeout) {
+            update_log_prefix(client);
+            LOGi("%s: waiting next request TIMED OUT => conn shutdown", __func__);
+            goto shutdown;
+        }
+    }
+    return;
+shutdown:
+    stream_read_stop(client);
+    shutdown_connection(client);
+}
+
+void svc_timer_cb(uv_timer_t * timer)
+{
+    if (g_srv.read_req_timeout || g_srv.curr_req_timeout || g_srv.next_req_timeout) {
+        uv_walk(g_srv.loop, client_aux_check, NULL);
+    }
 }
 
 void signal_handler(uv_signal_t * req, int signum)
@@ -900,6 +949,8 @@ int init_srv(void)
         uv_signal_init(g_srv.loop, &g_srv.signal);
         uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
     }
+    uv_timer_init(g_srv.loop, &g_srv.svc_timer);
+    uv_timer_start(&g_srv.svc_timer, svc_timer_cb, (uint64_t)g_srv.svc_timer_interval, (uint64_t)g_srv.svc_timer_interval);
     g_srv_inited = 1;
     hr = 0;
 
@@ -1072,6 +1123,18 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     rv = get_obj_attr_int(server, "tcp_recv_buf_size");
     g_srv.tcp_recv_buf_size = (rv >= 0) ? (int)rv : 0;
 
+    rv = get_obj_attr_int(server, "svc_timer_interval");
+    g_srv.svc_timer_interval = (rv > 0) ? (uint64_t)rv : 3000;  // default value = 3000 ms
+
+    rv = get_obj_attr_int(server, "read_req_timeout");
+    g_srv.read_req_timeout = (rv > 0) ? (uint64_t)rv : 0;  // default value = 0 ms (disabled)
+
+    rv = get_obj_attr_int(server, "curr_req_timeout");
+    g_srv.curr_req_timeout = (rv > 0) ? (uint64_t)rv : 0;  // default value = 0 ms (disabled)
+
+    rv = get_obj_attr_int(server, "next_req_timeout");
+    g_srv.next_req_timeout = (rv > 0) ? (uint64_t)rv : 0;  // default value = 0 ms (disabled)
+
     rv = get_obj_attr_int(server, "nowait");
     g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
 
@@ -1192,6 +1255,7 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
     if (g_srv_inited) {
         update_log_prefix(NULL);
         LOGn("%s", __func__);
+        uv_timer_stop(&g_srv.svc_timer);
         if (g_srv.signal.signal_cb) {
             uv_signal_stop(&g_srv.signal);
             g_srv.signal.signal_cb = NULL;
@@ -1199,6 +1263,7 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         if (g_srv.aio.asyncio) {
             aio_loop_shutdown(&g_srv.aio);
         }
+        uv_close((uv_handle_t *)&g_srv.svc_timer, NULL);
         for (int idx = 0; idx < g_srv.servers_num; idx++) {
             uv_close((uv_handle_t *)SERVER(idx), NULL);
         }

@@ -64,6 +64,11 @@ struct srv {
     int tcp_keepalive;     // negative = disabled; 0 = system default; 1...N = timeout in seconds
     int tcp_send_buf_size; // 0 = system default; 1...N = size in bytes
     int tcp_recv_buf_size; // 0 = system default; 1...N = size in bytes
+    uv_timer_t svc_timer;         // timer for additional connection processing
+    uint64_t svc_timer_interval;  // timer operation interval (millisec)
+    uint64_t read_req_timeout;    // timeout waiting for the next portion of current request (millisec)
+    uint64_t curr_req_timeout;    // timeout waiting for the current request to be fully received (millisec)
+    uint64_t next_req_timeout;    // timeout waiting for the next request from the client to begin (millisec)
     struct {
         int mode;          // 0 - disabled, 1 - nowait active, 2 - nowait with wait disconnect all peers
         int base_handles;  // number of base handles (listen socket + signal)
@@ -151,6 +156,8 @@ struct client {
         int64_t wsgi_input_size;   // total size of wsgi_input PyBytes stream
         llhttp_t parser;
         bool parser_locked;
+        uint64_t start_time;   // time of receiving first portion of current request (millisec)
+        uint64_t update_time;  // time of receiving any portion of current request (millisec)
     } request;
     int error;    // error code on process request and response
     xbuf_t head;  // dynamic buffer for request and response headers data
@@ -167,6 +174,7 @@ struct client {
         int64_t body_total_written;
         int chunked;    // 1 = chunked sending; 2 = last chunk send
         write_req_t write_req;
+        uint64_t last_chunk_time;    // time to start waiting for the next request (millisec)
     } response;
     // preallocated buffers
     char buf_head_prealloc[2*1024];

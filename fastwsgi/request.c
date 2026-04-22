@@ -243,6 +243,9 @@ int on_message_begin(llhttp_t * parser)
 {
     LOGi("on_message_begin: ------------------------------");
     client_t * client = (client_t *)parser->data;
+    client->request.start_time = UV_NOW;
+    client->request.update_time = UV_NOW;
+    client->response.last_chunk_time = 0;  // need to forget about the time of sending the response to the previous request
     client->request.load_state = LS_MSG_BEGIN;
     if (client->head.data == NULL)
         xbuf_init2(&client->head, client->buf_head_prealloc, sizeof(client->buf_head_prealloc));
@@ -686,6 +689,8 @@ int on_message_complete(llhttp_t * parser)
     LOGi("%s", __func__);
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_END;
+    client->request.start_time = 0;   // need to forget about the start time of processing the current request
+    client->request.update_time = 0;
 
     if (llhttp_should_keep_alive(parser)) {
         client->request.keep_alive = 1;

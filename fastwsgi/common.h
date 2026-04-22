@@ -69,6 +69,9 @@ typedef union {
 void logrepr(int level, PyObject * obj);
 #define LOGREPR(_level_, _msg_) if (g_log_level >= _level_) logrepr(_level_, _msg_)
 
+// return current time in millisec (uint64_t)
+#define UV_NOW (g_srv.loop->time)
+
 int64_t get_env_int(const char * name);
 
 const char * get_http_status_name(int status);

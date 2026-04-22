@@ -36,6 +36,10 @@ class _Server():
         self.tcp_keepalive = 0          # -1 = disabled; 0 = system default; 1...N = timeout in seconds
         self.tcp_send_buf_size = 0      # 0 = system default; 1...N = size in bytes
         self.tcp_recv_buf_size = 0      # 0 = system default; 1...N = size in bytes
+        self.svc_timer_interval = 3000  # service timer operation interval (millisec)
+        self.read_req_timeout = 0       # timeout (millisec) waiting for the next portion of current request (0 = disabled)
+        self.curr_req_timeout = 0       # timeout (millisec) waiting for the current request to be fully received (0 = disabled)
+        self.next_req_timeout = 0       # timeout (millisec) waiting for the next request from the client to begin (0 = disabled)
         self.nowait = 0
         self.num_workers = 1
         self.worker_list = [ ]
