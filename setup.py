@@ -130,14 +130,15 @@ class build_all(build_ext):
                 if compiler_type == 'msvc':
                     ext.extra_compile_args += [ '/Oi', '/Oy-', '/W3', '/WX-', '/Gd', '/GS' ]
                     ext.extra_compile_args += [ '/Zc:forScope', '/Zc:inline', '/fp:precise', '/analyze-' ]
-                    ext.extra_compile_args += ["/wd4702"]  # disable unreachable code warning
+                    ext.extra_compile_args += [ "/wd4702" ]  # disable unreachable code warning
                 else:
                     if FASTPYSGI_DEBUG:
                         ext.extra_compile_args += [ "-O0", "-fsanitize=address", "-fno-omit-frame-pointer" ]
                     else:
-                        ext.extra_compile_args += [ "-O3", "-fno-strict-aliasing" ]
-                        ext.extra_compile_args += [ "-ffunction-sections", "-fdata-sections" ]
+                        ext.extra_compile_args += [ "-O3", "-ffunction-sections", "-fdata-sections" ]
                     ext.extra_compile_args += [ "-fcommon", "-g", "-Wall" ]
+                    ext.extra_compile_args += [ "-fno-strict-aliasing" ]  # recomendation for libuv
+                    ext.extra_compile_args += [ "-Wno-long-long" ]  # recomendation for libuv
                     ext.extra_compile_args += [ "-Wno-unused-function", "-Wno-unused-variable" ]
                     ext.extra_compile_args += [ "-Wno-unreachable-code" ]  # disable unreachable code warning
                     if compiler.startswith("gcc") and compiler_ver_major >= 8:
