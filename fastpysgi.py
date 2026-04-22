@@ -4,7 +4,7 @@ import signal
 import argparse
 import _fastpysgi
 
-__version__ = '0.5'
+__version__ = '0.6'
 
 LL_DISABLED    = 0
 LL_FATAL_ERROR = 1
