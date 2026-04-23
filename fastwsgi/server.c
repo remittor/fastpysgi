@@ -204,9 +204,7 @@ int x_send_status(client_t * client, int status)
         wreq->buf.len = len;
         wreq->buf.base = wreq->data;
     }
-    stream_read_stop(client);
     wreq->client = client;
-    SET_CSTATE(CS_RESP_SEND);
     g_srv.num_writes++;
     int rc = uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
     if (rc != 0) {
