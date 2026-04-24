@@ -632,6 +632,10 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
         if (!body)
             body = g_cv.empty_bytes;
         
+        if (!PyBytes_CheckExact(body)) {
+            LOGe("%s: body is not a bytes!!!", __func__);
+            FIN(-4570111);
+        }
         int64_t body_size = (int64_t)PyBytes_GET_SIZE(body);
         asgi->send.body_size += body_size;
 
