@@ -626,6 +626,7 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
             FIN(0);
         }
         asgi->send.num_body++;
+        SET_CSTATE(CS_RESP_BILD);
 
         body = PyDict_GetItem(dict, g_cv.body);
         if (!body)
