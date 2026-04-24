@@ -139,6 +139,7 @@ struct client {
     client_state_t state;    // current client state
     tls_client_t tls;        // TLS client state. Active only if server->tls.enabled != 0
     asgi_t * asgi;           // ASGI 3.0 implementation
+    uv_timer_t read_timer;   // timer to call read_rxbuf_after_send after sending data to the client
     struct {
         int load_state;          // load_state_t
         int64_t http_content_length; // if -1 => "Content-Length" not specified
@@ -202,6 +203,7 @@ void close_connection(client_t * client);
 #define stream_read_start(_client_)  stream_read_start_ex((_client_), __func__)
 #define stream_read_stop(_client_)    stream_read_stop_ex((_client_), __func__)
 
+void read_timer_cb(uv_timer_t * timer);
 void read_rxbuf_after_send(client_t * client, const char * _func);
 
 // ----------- functions from request.c ----------------------------
@@ -258,5 +260,26 @@ void update_log_prefix(client_t * client)
     LOGd("%s: change client state: %s --> %s", _func_, get_cstate(client->state), get_cstate(_state_)); \
     client->state = _state_; \
 } while(0)
+
+static
+inline
+void start_read_timer(client_t * client, int timeout_ms)
+{
+    if (!client->read_timer.data) {
+        uv_timer_init(g_srv.loop, &client->read_timer);
+        client->read_timer.data = client;
+    }
+    uv_timer_start(&client->read_timer, read_timer_cb, (uint64_t)timeout_ms, 0);
+}
+
+static
+inline
+void free_read_timer(client_t * client)
+{
+    if (client && client->read_timer.data) {
+        client->read_timer.data = NULL;
+        uv_close((uv_handle_t*)&client->read_timer, NULL);
+    }
+}
 
 #endif

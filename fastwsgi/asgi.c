@@ -713,7 +713,9 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
             LOGd("%s: added chunk prefix, size = %d ", __func__, csize);
         }        
         int act = stream_write(client);
-
+        if (act != CA_OK || client->state == CS_DESTROY) {
+            FIN(-4570555);
+        }
         future = PyObject_CallObject(g_srv.aio.loop.create_future, NULL);
         FIN_IF(!future, -4570601);
         asgi->send.future = future;
@@ -726,6 +728,10 @@ fin:
     if (hr) {
         LOGe("%s: FIN WITH error = %d", __func__, hr);
         PyObject * error = PyErr_Format(PyExc_RuntimeError, "%s: error = %d", __func__, hr);
+        if (client->state != CS_DESTROY) {
+            SET_CSTATE(CS_DESTROY);
+        }
+        start_read_timer(client, 1);  // lazy call read_timer_cb
         return error;
     }
     return (future != NULL) ? future : self;
@@ -740,10 +746,10 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     PyObject * res = NULL;
     update_log_prefix(client);
 
-    LOGt_IF(client, "%s: rx.status = %s, cstate = %s, load_state = %d", __func__, get_rxstatus(client->rx.status), get_cstate(client->state), client->request.load_state);
+    LOGt_IF(client, "%s: CURR STATE: rx.status = %s, cstate = %s, load_state = %d", __func__, get_rxstatus(client->rx.status), get_cstate(client->state), client->request.load_state);
     res = PyObject_CallMethodObjArgs(future, g_cv.result, NULL);
     if (res == NULL) {
-        LOGe("%s: Exception detected", __func__);
+        LOGe("%s: Error or Exception detected", __func__);
         PyErr_Clear();
     } else {
         LOGd("%s: result type = %s", __func__, Py_TYPE(res)->tp_name);
@@ -754,8 +760,12 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
 //fin:
     if (client) {
         client->asgi = NULL;  // equ asgi_free (end of request and response)
-        if (client->rx.status == RXS_FREEZED) {
-            read_rxbuf_after_send(client, __func__);
+        if (res == NULL) {
+            // Error or Exception detected
+            SET_CSTATE(CS_DESTROY);
+        }
+        if (client->rx.status == RXS_FREEZED || client->state == CS_DESTROY) {
+            start_read_timer(client, 1);  // lazy call read_rxbuf_after_send
             Py_RETURN_NONE;
         } else {
             stream_read_start(client);  // continue reading from TCP socket (next request from client)

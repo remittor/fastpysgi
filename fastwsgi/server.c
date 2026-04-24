@@ -109,6 +109,7 @@ void close_cb(uv_handle_t * handle)
     free_read_buffer(client);
     asgi_free(client);
     tls_client_free(client);
+    free_read_timer(client);
     free(client);
     update_log_prefix(NULL);
 }
@@ -450,6 +451,25 @@ int send_error(client_t * client, int status, const char* error_string)
         return CA_OK;
     }
     return CA_SHUTDOWN;
+}
+
+void read_timer_cb(uv_timer_t * timer)
+{
+    client_t * client = (client_t *)timer->data;
+    if (!client) {
+        return;  // timer destroyed
+    }
+    before_loop_callback(client);
+    update_log_prefix(client);
+    if (client->state == CS_DESTROY) {
+        stream_read_stop(client);
+        shutdown_connection(client);
+        return;
+    }
+    if (client->rx.status == RXS_FREEZED) {
+        read_rxbuf_after_send(client, __func__);
+        return;
+    }
 }
 
 void read_rxbuf_after_send(client_t * client, const char * _func)
