@@ -6,11 +6,17 @@
 #include "lifespan.h"
 
 
+typedef enum {
+    UL_DISABLED = 0,
+    UL_CALL_SOON,        // inited via call_soon
+    UL_CALL_LATER,       // inited via call_later
+    UL_RUNNING,          // busy or not active
+} uni_loop_state_t;
+
 typedef struct {
     PyObject * asyncio;  // module
     PyObject * uni_loop; // united loop
-    PyObject * uni_loop_periodic;  // united loop for call_later calls
-    int        periodic_armed;     // 1 = call_later already in aio queue
+    uni_loop_state_t uni_loop_state;
     int        idle_num;
     int        loop_timeout;  // millisec
     int        req_hdr_lower;   // 0 = not change case for header names, 1 = force lowercase

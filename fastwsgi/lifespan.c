@@ -465,6 +465,7 @@ int lifespan_startup(lifespan_t * ls)
     Py_XDECREF(ret);
 
     // Schedule the first receive() trigger via call_soon so the coroutine starts running before we block on the startup_future.
+    g_srv.aio.uni_loop_state = UL_CALL_SOON;
     PyObject * noop = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
     Py_XDECREF(noop);
 
