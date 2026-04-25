@@ -136,6 +136,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.cibw_arch }}
           CIBW_ENABLE: cpython-prerelease pypy
+          CIBW_SKIP: "cp3*t-*"  # exclude free-threading pythons
 
       - name: Upload as build artifacts
         uses: actions/upload-artifact@v4
