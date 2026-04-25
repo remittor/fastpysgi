@@ -466,6 +466,7 @@ int asgi_future_set_result(client_t * client, PyObject ** ptr_future, PyObject *
     FIN_IF(!ptr_future, -4530964);
     future = *ptr_future;
     FIN_IF(!future, -4530965);
+    Py_INCREF(future);
 
     done = PyObject_CallMethodObjArgs(future, g_cv.done, NULL);
     FIN_IF(!done, -4530966);
