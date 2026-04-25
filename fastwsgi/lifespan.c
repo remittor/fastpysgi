@@ -160,7 +160,7 @@ PyObject * lifespan_recv(PyObject * self, PyObject * notused)
     Py_INCREF(future);   // one ref owned by ls->recv_future, one returned
 
     // If we are in STARTING state the server is waiting for the app to
-    // call receive() — resolve immediately with the startup event so the coroutine can proceed.
+    // call receive() - resolve immediately with the startup event so the coroutine can proceed.
     if (ls->state == LS_STATE_STARTING) {
         PyObject * event = PyDict_New();
         PyDict_SetItem(event, g_cv.type, g_ls_type_startup);
@@ -173,7 +173,7 @@ PyObject * lifespan_recv(PyObject * self, PyObject * notused)
         ls_future_set_result(future, event);
         Py_DECREF(event);
     }
-    // Otherwise the future just waits — the server will resolve it later
+    // Otherwise the future just waits - the server will resolve it later
 
     return future;  // caller owns this ref
 }
@@ -229,7 +229,7 @@ PyObject * lifespan_send(PyObject * self, PyObject * dict)
         }
     }
     else if (strcmp(event, "lifespan.shutdown.failed") == 0) {
-        ls->state = LS_STATE_DONE;  // treat as done — we're shutting down anyway
+        ls->state = LS_STATE_DONE;  // treat as done - we're shutting down anyway
         PyObject * msg_obj = PyDict_GetItem(dict, g_ls_str_message);
         if (msg_obj && PyUnicode_Check(msg_obj)) {
             const char * msg = PyUnicode_AsUTF8(msg_obj);
@@ -260,7 +260,7 @@ PyObject * lifespan_send(PyObject * self, PyObject * dict)
 }
 
 /* -------------------------------------------------------------------------
- * lifespan.done()  — asyncio task done-callback
+ * lifespan.done()  - asyncio task done-callback
  *
  * Called when the lifespan coroutine task finishes (normally or with
  * exception).  We use this to detect unsupported lifespan (TypeError raised
@@ -277,7 +277,7 @@ PyObject * lifespan_done(PyObject * self, PyObject * task)
     // Retrieve task result / exception
     PyObject * exc = PyObject_CallMethodObjArgs(task, g_ls_str_exception, NULL);
     if (exc && exc != Py_None) {
-        // Check if it's a TypeError — app doesn't handle lifespan scope
+        // Check if it's a TypeError - app doesn't handle lifespan scope
         if (PyErr_GivenExceptionMatches(exc, PyExc_TypeError) ||
             PyErr_GivenExceptionMatches(exc, PyExc_NotImplementedError)) {
             if (ls->mode == LS_MODE_AUTO) {
@@ -303,7 +303,7 @@ PyObject * lifespan_done(PyObject * self, PyObject * task)
             }
         }
     } else {
-        // Normal exit without exception — if we were still STARTING that's
+        // Normal exit without exception - if we were still STARTING that's
         // a bug in the app (it returned without sending startup.complete),
         // but we treat it as unsupported in auto mode.
         if (ls->state == LS_STATE_STARTING) {
@@ -416,7 +416,7 @@ int lifespan_startup(lifespan_t * ls)
     FIN_IF(!handler, -2);
     handler->ls = ls;
 
-    // Create the startup_future — we'll wait on this
+    // Create the startup_future - we'll wait on this
     ls->startup_future = ls_create_future();
     FIN_IF(!ls->startup_future, -3);
 
@@ -469,7 +469,7 @@ int lifespan_startup(lifespan_t * ls)
     Py_XDECREF(noop);
 
     // Drive the asyncio event loop until startup_future is resolved.
-    // run_until_complete() blocks the Python thread but libuv is not involved yet at this point — we haven't called uv_listen yet.
+    // run_until_complete() blocks the Python thread but libuv is not involved yet at this point - we haven't called uv_listen yet.
     PyObject * result = PyObject_CallFunctionObjArgs(g_srv.aio.loop.run_until_complete, ls->startup_future, NULL);
     Py_XDECREF(result);
 

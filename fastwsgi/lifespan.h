@@ -46,9 +46,9 @@ typedef struct {
     /* asyncio.Future that resolves when shutdown.complete arrives */
     PyObject * shutdown_future;
 
-    /* Future given to the app's receive() — server sets result to trigger events */
+    /* Future given to the app's receive() - server sets result to trigger events */
     PyObject * recv_future;
-    /* Future given to the app's send() — server waits on this */
+    /* Future given to the app's send() - server waits on this */
     PyObject * send_future;
 
     /* asyncio.Task for the lifespan coroutine */
