@@ -540,10 +540,18 @@ int lifespan_shutdown(lifespan_t * ls)
     // Temporarily clear exit_code so uni_loop does not immediately stop the asyncio loop before shutdown.complete is received.
     int saved_exit_code = g_srv.exit_code;
     g_srv.exit_code = 0;
+    uni_loop_state_t saved_ul_state = g_srv.aio.uni_loop_state;
+    if (g_srv.aio.uni_loop_state == UL_DISABLED) {
+        // Temporarily allow uni_loop to run
+        g_srv.aio.uni_loop_state = UL_CALL_SOON;
+        PyObject * noop = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
+        Py_XDECREF(noop);
+    }
     LOGi("%s: waiting for shutdown.complete ...", __func__);
     PyObject * result = PyObject_CallFunctionObjArgs(g_srv.aio.loop.run_until_complete, ls->shutdown_future, NULL);
     Py_XDECREF(result);
     g_srv.exit_code = saved_exit_code;
+    g_srv.aio.uni_loop_state = UL_DISABLED;
 
     LOGi("%s: complete with state = %d", __func__, (int)ls->state);
     hr = 0;
