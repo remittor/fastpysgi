@@ -39,11 +39,13 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
     g_srv.aio.uni_loop_state = UL_RUNNING;
     g_srv.num_loop_cb = 0;  // reset cb counter
 
+    int uv_run_count = 0;
     uv_metrics_info(g_srv.loop, uv_metrics_before);
     while (1) {
         uv_run(g_srv.loop, UV_RUN_NOWAIT);
+        uv_run_count++;
         uv_metrics_info(g_srv.loop, uv_metrics_after);
-        if (uv_metrics_after->events - uv_metrics_before->events == 0) {
+        if (uv_run_count > 150 || uv_metrics_after->events - uv_metrics_before->events == 0) {
             break;
         }
         PTR_SWAP(uv_metrics_before, uv_metrics_after);
