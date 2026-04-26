@@ -437,10 +437,11 @@ fin:
 
 // -----------------------------------------------------------------------------------
 
-int asgi_future_set_result_soon(client_t * client, PyObject * future, PyObject * result)
+int asgi_future_set_result_soon(client_t * client, PyObject * future, bool check, PyObject * result)
 {
     int hr = 0;
     PyObject * set_result = NULL;
+    PyObject * done = NULL;
     PyObject * ret = NULL;
 
     FIN_IF(!future, -4530914);
@@ -448,81 +449,93 @@ int asgi_future_set_result_soon(client_t * client, PyObject * future, PyObject *
     set_result = PyObject_GetAttr(future, g_cv.set_result);
     FIN_IF(!set_result, -4530916);
     FIN_IF(!PyCallable_Check(set_result), -4530917);
-
+    if (check) {
+        done = PyObject_CallMethodObjArgs(future, g_cv.done, NULL);
+        FIN_IF(!done, -4530918);
+        FIN_IF(done == Py_True, -4530919);  // already completed
+    }
     ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_result, result, NULL);
     FIN_IF(!ret, -4530921);
     hr = 0;
 fin:
     Py_XDECREF(ret);
+    Py_XDECREF(done);
     Py_XDECREF(set_result);
     return hr;
 }
 
-int asgi_future_set_result(client_t * client, PyObject ** ptr_future, PyObject * result)
+int asgi_exec_send_future(client_t * client)
 {
-    int hr = 0;
-    PyObject * future = NULL;
-    PyObject * done = NULL;
-    PyObject * ret = NULL;
-
-    FIN_IF(!ptr_future, -4530964);
-    future = *ptr_future;
-    FIN_IF(!future, -4530965);
-    Py_INCREF(future);
-
-    done = PyObject_CallMethodObjArgs(future, g_cv.done, NULL);
-    FIN_IF(!done, -4530966);
-    FIN_IF(done == Py_True, -4530967);  // already completed
-
-    ret = PyObject_CallMethodObjArgs(future, g_cv.set_result, result, NULL);
-    FIN_IF(!ret, -4530971);
-    hr = 0;
-fin:
-    Py_XDECREF(ret);
-    Py_XDECREF(done);
-    Py_XDECREF(future);
-    if (ptr_future)
-        *ptr_future = NULL;
-
-    return hr;
+    PyObject * send_future = client->asgi->send.future;
+    if (!send_future) {
+        LOGe("%s: send.future is NULL => closing connection", __func__);
+        return -4530931;
+    }
+    client->asgi->send.future = NULL;
+    int err = asgi_future_set_result_soon(client, send_future, true, Py_True);
+    Py_DECREF(send_future);
+    if (err) {
+        LOGe("%s: asgi_future_set_result_soon failed: err = %d => closing connection", __func__, err);
+        return -4530931;
+    }
+    return 0;
 }
 
-int asgi_future_set_exception(client_t * client, PyObject ** ptr_future, const char * fmt, ...)
+static
+int asgi_v_future_set_exception_soon(client_t * client, PyObject * future, const char * fmt, va_list args)
 {
     int hr = 0;
     char text[1024];
-    va_list args;
-    PyObject * future = NULL;
     PyObject * exc_text = NULL;
     PyObject * exception = NULL;
+    PyObject * set_exception = NULL;
     PyObject * ret = NULL;
 
-    FIN_IF(!ptr_future, -4530981);
-    future = *ptr_future;
-    FIN_IF(!future, -4530982);
-
-    va_start(args, fmt);
+    FIN_IF(!future, -4530851);
     vsnprintf(text, sizeof(text), fmt, args);
-    va_end(args);
 
     exc_text = PyUnicode_FromString(text);
-    FIN_IF(!exc_text, -4530984);
+    FIN_IF(!exc_text, -4530852);
 
     exception = PyObject_CallFunctionObjArgs(PyExc_RuntimeError, exc_text, NULL);
-    FIN_IF(!exception, -4530985);
+    FIN_IF(!exception, -4530853);
 
-    ret = PyObject_CallMethodObjArgs(future, g_cv.set_exception, exception, NULL);
-    FIN_IF(!ret, -4530989);
+    set_exception = PyObject_GetAttr(future, g_cv.set_exception);
+    FIN_IF(!set_exception, -4530854);
+
+    ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_exception, exception, NULL);
+    FIN_IF(!ret, -4530855);
     hr = 0;
 fin:
     Py_XDECREF(ret);
+    Py_XDECREF(set_exception);
     Py_XDECREF(exception);
     Py_XDECREF(exc_text);
-    Py_XDECREF(future);
-    if (ptr_future)
-        *ptr_future = NULL;
-
     return hr;
+}
+
+int asgi_future_set_exception_soon(client_t * client, PyObject * future, const char * fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    int rc = asgi_v_future_set_exception_soon(client, future, fmt, args);
+    va_end(args);
+    return rc;
+}
+
+
+int asgi_exec_send_future_as_exception(client_t * client, const char * fmt, ...)
+{
+    PyObject * send_future = client->asgi->send.future;
+    if (send_future) {
+        client->asgi->send.future = NULL;
+        va_list args;
+        va_start(args, fmt);
+        asgi_v_future_set_exception_soon(client, send_future, fmt, args);
+        va_end(args);
+        Py_DECREF(send_future);
+    }
+    return 0;
 }
 
 // -----------------------------------------------------------------------------------
@@ -566,7 +579,7 @@ PyObject * asgi_receive(PyObject * self, PyObject * notused)
 
     future = PyObject_CallObject(g_srv.aio.loop.create_future, NULL);
 
-    int err = asgi_future_set_result_soon(client, future, dict);
+    int err = asgi_future_set_result_soon(client, future, true, dict);
     FIN_IF(err, -4560775);
     asgi->recv.completed = true;
 

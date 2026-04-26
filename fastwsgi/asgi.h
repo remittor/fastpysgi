@@ -89,8 +89,11 @@ int  asgi_init(client_t * client);
 int  asgi_free(client_t * client);
 int  asgi_call_app(client_t * client);
 
-int  asgi_future_set_result(client_t * client, PyObject ** ptr_future, PyObject * result);
-int  asgi_future_set_exception(client_t * client, PyObject ** ptr_future, const char * fmt, ...);
+int  asgi_future_set_result_soon(client_t * client, PyObject * future, bool check, PyObject * result);
+int  asgi_exec_send_future(client_t * client);
+
+int  asgi_future_set_exception_soon(client_t * client, PyObject * future, const char * fmt, ...);
+int  asgi_exec_send_future_as_exception(client_t * client, const char * fmt, ...);
 
 
 static

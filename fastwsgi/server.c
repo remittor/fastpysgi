@@ -308,17 +308,14 @@ fin:
         reset_head_buffer(client);
         if (status < 0) {
             // cancel await current app.send()
-            asgi_future_set_exception(client, &client->asgi->send.future, "Write error: %d", status);
+            asgi_exec_send_future_as_exception(client, "Write error: %d", status);
+            goto error;
         }
-        else {
-            PyObject * result = Py_True;
-            Py_INCREF(result);
-            // complete await current app.send()
-            int err = asgi_future_set_result(client, &client->asgi->send.future, result);
-            if (err) {
-                LOGe("%s: asgi_future_set_result failed: %d — closing connection", __func__, err);
-                close_conn = 1;
-            }
+        // complete await current app.send()
+        int err = asgi_exec_send_future(client);
+        if (err) {
+            LOGe("%s: asgi_exec_send_future failed: %d => closing connection", __func__, err);
+            goto error;
         }
         if (client->asgi->send.latest_chunk) {
             LOGd("%s: ASGI last chunk sended!", __func__);
@@ -347,6 +344,7 @@ fin:
         }
     }
     if (close_conn) {
+error:
         close_connection(client);
     }
 }
