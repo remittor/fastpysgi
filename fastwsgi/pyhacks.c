@@ -1,4 +1,10 @@
 #include "pyhacks.h"
+#include <time.h>
+
+#if defined(MS_WINDOWS)
+#include <windows.h>
+#endif
+
 
 typedef struct {
     PyObject_HEAD
@@ -219,3 +225,35 @@ PyObject * _io_BytesIO_write(bytesio * self, PyObject * b)
 }
     
 #endif  // PY_MAJOR_VERSION && PY_MINOR_VERSION
+
+// ===================== TIME ==================================================================
+
+// pymonotonic(_PyTime_t *tp, _Py_clock_info_t *info, int raise)
+// py_get_monotonic_clock(PyTime_t *tp, _Py_clock_info_t *info, int raise_exc)
+
+uint64_t py_time_monotonic_ns(void)
+{
+#if defined(__APPLE__) || defined(__hpux) || PY_MINOR_VERSION > 14
+#if PY_MINOR_VERSION <= 12
+    return (uint64_t)_PyTime_GetMonotonicClock();
+#else
+    return (uint64_t)PyTime_MonotonicRaw();
+#endif
+#elif defined(MS_WINDOWS)
+#if PY_MINOR_VERSION <= 12
+    return GetTickCount64() * 1000000;
+#else
+    return (uint64_t)PyTime_MonotonicRaw();
+#endif
+#else
+    struct timespec ts;
+#ifdef CLOCK_HIGHRES
+    clock_gettime(CLOCK_HIGHRES, &ts);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
+    return (uint64_t)ts.tv_sec * 1000 * 1000 * 1000 + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+

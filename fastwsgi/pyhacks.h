@@ -8,4 +8,6 @@ typedef struct bytesio bytesio_t;
 bytesio_t * get_bytesio_object(PyObject * io_BytesIO);
 Py_ssize_t io_BytesIO_write_bytes(bytesio_t * bio, const char * bytes, Py_ssize_t len);
 
+uint64_t py_time_monotonic_ns(void);
+
 #endif
