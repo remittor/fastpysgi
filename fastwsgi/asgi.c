@@ -376,9 +376,9 @@ int asgi_get_info_from_response(client_t * client, PyObject * dict)
 
     client->response.wsgi_content_length = -1;  // unknown
     PyObject * headers = PyDict_GetItem(dict, g_cv.headers);
-    FIN_IF(!headers, -4);
+    FIN_if(!headers, -4, PyErr_Clear());
     iterator = PyObject_GetIter(headers);
-    FIN_IF(!iterator, -5);
+    FIN_if(!iterator, -5, PyErr_Clear());
 
     for (size_t i = 0; /* nothing */ ; i++) {
         Py_XDECREF(item);
@@ -449,11 +449,11 @@ int asgi_future_set_result_soon(client_t * client, PyObject * future, bool check
     FIN_IF(!future, -4530914);
 
     set_result = PyObject_GetAttr(future, g_cv.set_result);
-    FIN_IF(!set_result, -4530916);
+    FIN_if(!set_result, -4530916, PyErr_Clear());
     FIN_IF(!PyCallable_Check(set_result), -4530917);
     if (check) {
         done = PyObject_CallMethodObjArgs(future, g_cv.done, NULL);
-        FIN_IF(!done, -4530918);
+        FIN_if(!done, -4530918, PyErr_Clear());
         FIN_IF(done == Py_True, -4530919);  // already completed
     }
     ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_result, result, NULL);
@@ -500,10 +500,10 @@ int asgi_v_future_set_exception_soon(client_t * client, PyObject * future, const
     FIN_IF(!exc_text, -4530852);
 
     exception = PyObject_CallFunctionObjArgs(PyExc_RuntimeError, exc_text, NULL);
-    FIN_IF(!exception, -4530853);
+    FIN_if(!exception, -4530853, PyErr_Clear());
 
     set_exception = PyObject_GetAttr(future, g_cv.set_exception);
-    FIN_IF(!set_exception, -4530854);
+    FIN_if(!set_exception, -4530854, PyErr_Clear());
 
     ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_exception, exception, NULL);
     FIN_IF(!ret, -4530855);
@@ -524,7 +524,6 @@ int asgi_future_set_exception_soon(client_t * client, PyObject * future, const c
     va_end(args);
     return rc;
 }
-
 
 int asgi_exec_send_future_as_exception(client_t * client, const char * fmt, ...)
 {

@@ -52,7 +52,7 @@ int64_t get_obj_attr_int(PyObject * obj, const char * name)
 {
     int64_t hr = 0;
     PyObject * attr = PyObject_GetAttrString(obj, name);
-    FIN_IF(!attr, LLONG_MIN);  // error
+    FIN_if(!attr, LLONG_MIN, PyErr_Clear());  // error
     FIN_IF(attr == Py_True, 1);
     FIN_IF(attr == Py_False, 0);
     FIN_IF(!PyLong_CheckExact(attr), LLONG_MIN);
@@ -67,6 +67,7 @@ const char * get_obj_attr_str(PyObject * obj, const char * name)
     const char * res;
     PyObject * attr = PyObject_GetAttrString(obj, name);
     if (!attr || !PyUnicode_CheckExact(attr)) {
+        PyErr_Clear();
         Py_XDECREF(attr);
         return NULL;
     }
@@ -79,7 +80,7 @@ int get_obj_attr_list_tup(PyObject * obj, const char * name, int idx, PyObject *
 {
     int hr = -1;
     PyObject * list = PyObject_GetAttrString(obj, name);
-    FIN_IF(!list, -1);
+    FIN_if(!list, -1, PyErr_Clear());
     FIN_IF(list == Py_None, -41);
     FIN_IF(!PyList_Check(list), -2);
     int size = (int)PyList_GET_SIZE(list);
@@ -231,6 +232,7 @@ PyObject * get_function(PyObject * object)
         return met;
     }
     PyObject * call = PyObject_GetAttrString(object, "__call__");
+    if (!call) PyErr_Clear();
     if (call) {
         if (PyFunction_Check(call))
             return call;
@@ -271,7 +273,7 @@ int get_func_sig_arg_count(PyObject * func)
     if (!sig) PyErr_Clear();
     FIN_IF(!sig, -3);
     params = PyObject_GetAttrString(sig, "parameters");
-    FIN_IF(!params, -4);
+    FIN_if(!params, -4, PyErr_Clear());
     hr = (int)PyMapping_Size(params);
 fin:
     Py_XDECREF(params);
@@ -289,16 +291,14 @@ bool is_coroutine_function(PyObject * func)
     asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!asyncio, -3);
     ret = PyObject_CallMethod(asyncio, "iscoroutinefunction", "O", func);
-    if (!ret) PyErr_Clear();
-    FIN_IF(!ret, -4);
+    FIN_if(!ret, -4, PyErr_Clear());
     hr = PyObject_IsTrue(ret) ? 0 : -1;
     if (hr) {
         Py_XDECREF(ret);
         call_attr = PyObject_GetAttrString(func, "__call__");
-        FIN_IF(!call_attr, -5);
+        FIN_if(!call_attr, -5, PyErr_Clear());
         ret = PyObject_CallMethod(asyncio, "iscoroutinefunction", "O", call_attr);
-        if (!ret) PyErr_Clear();
-        FIN_IF(!ret, -6);
+        FIN_if(!ret, -6, PyErr_Clear());
         hr = PyObject_IsTrue(ret) ? 0 : -1;
     }
 fin:

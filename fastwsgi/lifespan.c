@@ -118,11 +118,11 @@ int ls_future_set_result(PyObject * future, PyObject * result)
 
     // Check it hasn't already been resolved
     done = PyObject_CallMethodObjArgs(future, g_cv.done, NULL);
-    FIN_IF(!done, -2);
+    FIN_if(!done, -2, PyErr_Clear());
     FIN_IF(done == Py_True, 0);  // already done
 
     set_result = PyObject_GetAttr(future, g_cv.set_result);
-    FIN_IF(!set_result, -3);
+    FIN_if(!set_result, -3, PyErr_Clear());
 
     ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_result, result, NULL);
     FIN_IF(!ret, -4);

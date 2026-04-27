@@ -1208,6 +1208,7 @@ int wsgi_body_preload(client_t * client, PyObject * wsgi_body)
             PyObject * buf_size = PyLong_FromLong(g_srv.max_chunk_size);
             int error = PyObject_SetAttr(wsgi_body, g_cv.buffer_size, buf_size); // if OK then refcnt: 2 -> 1
             if (error) {
+                PyErr_Clear();
                 LOGw("wsgi_body: failed to change file read buffer size (Flask.FileWrapper)");
                 if (refcnt == Py_REFCNT(orig_buffer_size)) {  // if (refcnt == 2)
                     Py_DECREF(orig_buffer_size);  // refcnt: 2 -> 1
