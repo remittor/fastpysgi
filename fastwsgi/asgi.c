@@ -203,6 +203,8 @@ int asyncio_load_cfg(asyncio_t * aio)
     } else {
         aio->loop_timeout_us = (rv >= 0 && rv <= 1000000) ? (int)rv : 1000000;
     }
+    rv = get_obj_attr_int(g_srv.pysrv, "loop_call_soon");  // 0 = disabled, 1 = allowed
+    aio->allow_call_soon = (rv >= 1) ? 1 : 0;  // 0 is default
 
     rv = get_obj_attr_int(g_srv.pysrv, "lifespan");  // 0 = off, 1 = on, 2 = auto (default)
     aio->lifespan.mode = (rv >= 0 && rv <= 2) ? (int)rv : (int)LS_MODE_AUTO;
@@ -265,6 +267,10 @@ int aio_loop_call(asyncio_t * aio, PyObject * func_cb, int timeout_us, PyObject 
     } else {
         fn_cb = func_cb;
         method = (timeout_us < 0) ? UL_CALL_SOON : UL_CALL_LATER;
+    }
+    if (method == UL_CALL_SOON && !aio->allow_call_soon) {
+        method = UL_CALL_LATER;
+        timeout_us = 0;
     }
     if (uni_loop) {
         aio->uni_loop_state = method;

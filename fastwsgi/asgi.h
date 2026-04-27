@@ -18,6 +18,7 @@ typedef struct {
     PyObject * uni_loop; // united loop
     uni_loop_state_t uni_loop_state;
     int        idle_num;
+    int        allow_call_soon;
     int        loop_timeout_us; // timeout for call_later into uni_loop (microsec)
     int        req_hdr_lower;   // 0 = not change case for header names, 1 = force lowercase
     struct {
