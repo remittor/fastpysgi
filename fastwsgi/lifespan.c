@@ -103,7 +103,7 @@ PyObject * ls_create_future(void)
 }
 
 /* -------------------------------------------------------------------------
- * Helper: resolve a future with a result (call_soon so it's safe from C)
+ * Helper: resolve a future with a result (call_later so it's safe from C)
  * ---------------------------------------------------------------------- */
 static
 int ls_future_set_result(PyObject * future, PyObject * result)
@@ -124,8 +124,8 @@ int ls_future_set_result(PyObject * future, PyObject * result)
     set_result = PyObject_GetAttr(future, g_cv.set_result);
     FIN_if(!set_result, -3, PyErr_Clear());
 
-    ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_result, result, NULL);
-    FIN_IF(!ret, -4);
+    int rc = aio_loop_call(&g_srv.aio, set_result, 0, result);  // call_later
+    FIN_IF(rc < 0, -4);
 
     hr = 0;
 fin:
@@ -464,10 +464,8 @@ int lifespan_startup(lifespan_t * ls)
     PyObject * ret = PyObject_CallMethodObjArgs(task, g_cv.add_done_callback, done, NULL);
     Py_XDECREF(ret);
 
-    // Schedule the first receive() trigger via call_soon so the coroutine starts running before we block on the startup_future.
-    g_srv.aio.uni_loop_state = UL_CALL_SOON;
-    PyObject * noop = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
-    Py_XDECREF(noop);
+    // Schedule the first receive() trigger via uni_loop so the coroutine starts running before we block on the startup_future.
+    aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_LATER, 0, NULL);
 
     // Drive the asyncio event loop until startup_future is resolved.
     // run_until_complete() blocks the Python thread but libuv is not involved yet at this point - we haven't called uv_listen yet.
@@ -543,14 +541,14 @@ int lifespan_shutdown(lifespan_t * ls)
     uni_loop_state_t saved_ul_state = g_srv.aio.uni_loop_state;
     if (g_srv.aio.uni_loop_state == UL_DISABLED) {
         // Temporarily allow uni_loop to run
-        g_srv.aio.uni_loop_state = UL_CALL_SOON;
-        PyObject * noop = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
-        Py_XDECREF(noop);
+        aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_LATER, 0, NULL);
     }
     LOGi("%s: waiting for shutdown.complete ...", __func__);
     PyObject * result = PyObject_CallFunctionObjArgs(g_srv.aio.loop.run_until_complete, ls->shutdown_future, NULL);
     Py_XDECREF(result);
-    g_srv.exit_code = saved_exit_code;
+    if (g_srv.exit_code == 0) {
+        g_srv.exit_code = saved_exit_code;
+    }
     g_srv.aio.uni_loop_state = UL_DISABLED;
 
     LOGi("%s: complete with state = %d", __func__, (int)ls->state);

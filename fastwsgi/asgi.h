@@ -18,7 +18,7 @@ typedef struct {
     PyObject * uni_loop; // united loop
     uni_loop_state_t uni_loop_state;
     int        idle_num;
-    int        loop_timeout;  // millisec
+    int        loop_timeout_us; // timeout for call_later into uni_loop (microsec)
     int        req_hdr_lower;   // 0 = not change case for header names, 1 = force lowercase
     struct {
         int borrowed;
@@ -47,6 +47,7 @@ int asyncio_load_cfg(asyncio_t * aio);
 
 int aio_loop_run(asyncio_t * aio);
 int aio_loop_shutdown(asyncio_t * aio);
+int aio_loop_call(asyncio_t * aio, PyObject * func_cb, int timeout_us, PyObject * arg);
 
 
 typedef struct {

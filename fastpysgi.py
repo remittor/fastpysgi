@@ -44,7 +44,7 @@ class _Server():
         self.num_workers = 1
         self.worker_list = [ ]
         self.loop = None                # ASGI: borrowed aio loop (None = new_event_loop)
-        self.loop_timeout = 3           # ASGI: timeout for CPU relax (millisec)
+        self.loop_timeout = 3000        # ASGI: timeout for CPU relax (microsec)
         self.lifespan = 2               # ASGI: 0 = off, 1 = on, 2 = auto
         self.lifespan_fose = 0          # ASGI: 0 = log and continue, 1 = server abort (fail_on_startup_error)
         self.req_hdr_lower = 1          # ASGI: 0 = not change case for header names, 1 = force lowercase

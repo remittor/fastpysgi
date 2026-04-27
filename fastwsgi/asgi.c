@@ -21,6 +21,7 @@ bool asgi_app_check2(PyObject * app)
 
 PyObject * uni_loop(PyObject * self, PyObject * not_used)
 {
+    int rc = 0;
     PyObject * res = NULL;
     uv_metrics_t uv_metrics_list[2];
     uv_metrics_t * uv_metrics_before = &uv_metrics_list[0];
@@ -57,26 +58,20 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
         g_srv.aio.idle_num = 0;
     }
     if (g_srv.aio.idle_num <= 50) {
-        g_srv.aio.uni_loop_state = UL_CALL_SOON;
-        res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
+        rc = aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_SOON, -1, NULL);
     } else {
         int timeout_ms = uv_backend_timeout(g_srv.loop);
         if (timeout_ms >= 0 || g_srv.aio.loop.relax_timeout == NULL) {
-            g_srv.aio.uni_loop_state = UL_CALL_SOON;
-            res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
+            rc = aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_SOON, -1, NULL);
         } else {
-            g_srv.aio.uni_loop_state = UL_CALL_LATER;
-            res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_later, g_srv.aio.loop.relax_timeout, g_srv.aio.uni_loop, NULL);
+            rc = aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_LATER, -1, NULL);
         }
     }
-    if (!res || g_srv.aio.uni_loop_state == UL_RUNNING) {
-        const char * method = (g_srv.aio.uni_loop_state == UL_CALL_LATER) ? "call_later" : "call_soon";
+    if (rc < 0) {
+        const char * method = (g_srv.aio.uni_loop_state == UL_CALL_SOON) ? "call_soon" : "call_later";
         LOGf("%s: method %s cannot insert 'uni_loop' into aio.loop !!!", __func__, method);
-        // try again
-        g_srv.aio.uni_loop_state = UL_CALL_SOON;
-        res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
+        abort();
     }
-    Py_XDECREF(res);
     Py_RETURN_NONE;
 }
 
@@ -158,7 +153,7 @@ int asyncio_init(asyncio_t * aio)
     FIN_IF(!aio->uni_loop, -4500213);
     FIN_IF(!PyCallable_Check(aio->uni_loop), -4500214);
     
-    aio->loop.relax_timeout = (aio->loop_timeout > 0) ? PyFloat_FromDouble((double)aio->loop_timeout / 1000.0) : NULL;
+    aio->loop.relax_timeout = (aio->loop_timeout_us >= 0) ? PyFloat_FromDouble((double)aio->loop_timeout_us / 1000000.0) : NULL;
     aio->uni_loop_state = UL_DISABLED;
     aio->idle_num = 0;
 
@@ -202,8 +197,12 @@ int asyncio_free(asyncio_t * aio, bool free_self)
 int asyncio_load_cfg(asyncio_t * aio)
 {
     int64_t rv;
-    rv = get_obj_attr_int(g_srv.pysrv, "loop_timeout");  // 0 = off, 1 = 1ms, 3 = 3ms (default)
-    aio->loop_timeout = (rv >= 0 && rv <= 1000) ? (int)rv : 3;
+    rv = get_obj_attr_int(g_srv.pysrv, "loop_timeout");  // -1 = call_soon, 0 = 0ms, 3000 = 3ms (default)
+    if (rv < 0) {
+        aio->loop_timeout_us = (rv == LLONG_MIN) ? 3000 : -1;  // -1 => use call_soon always into uni_loop
+    } else {
+        aio->loop_timeout_us = (rv >= 0 && rv <= 1000000) ? (int)rv : 1000000;
+    }
 
     rv = get_obj_attr_int(g_srv.pysrv, "lifespan");  // 0 = off, 1 = on, 2 = auto (default)
     aio->lifespan.mode = (rv >= 0 && rv <= 2) ? (int)rv : (int)LS_MODE_AUTO;
@@ -231,9 +230,7 @@ int aio_loop_run(asyncio_t * _aio)
         return 17;
     }
     if (g_srv.aio.uni_loop_state == UL_DISABLED) {
-        g_srv.aio.uni_loop_state = UL_CALL_SOON;
-        res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, aio->uni_loop, NULL);
-        Py_XDECREF(res);
+        aio_loop_call(aio, (PyObject *)UL_CALL_LATER, 0, NULL);
     }
     res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
     Py_XDECREF(res);
@@ -247,6 +244,52 @@ int aio_loop_shutdown(asyncio_t * _aio)
     aio->uni_loop_state = UL_DISABLED;
     lifespan_shutdown(&aio->lifespan);
     return 0;
+}
+
+int aio_loop_call(asyncio_t * aio, PyObject * func_cb, int timeout_us, PyObject * arg)
+{
+    PyObject * res = NULL;
+    bool uni_loop = false;
+    uni_loop_state_t method;
+    PyObject * fn_cb = NULL;
+    if ((size_t)func_cb == (size_t)UL_CALL_SOON || (size_t)func_cb == (size_t)UL_CALL_LATER) {
+        uni_loop = true;
+        fn_cb = aio->uni_loop;
+        method = (uni_loop_state_t)(size_t)func_cb;
+        if (timeout_us < 0 && method == UL_CALL_LATER) {
+            timeout_us = aio->loop_timeout_us;
+            if (timeout_us < 0) {
+                method = UL_CALL_SOON;
+            }
+        }
+    } else {
+        fn_cb = func_cb;
+        method = (timeout_us < 0) ? UL_CALL_SOON : UL_CALL_LATER;
+    }
+    if (uni_loop) {
+        aio->uni_loop_state = method;
+    }
+    if (method == UL_CALL_SOON) {
+        res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, fn_cb, arg, NULL);
+    }
+    else {
+        PyObject * v_timeout = NULL;
+        PyObject * timeout;
+        if (timeout_us <= 0) {
+            timeout = g_cv.f0;
+        }
+        else if (timeout_us == aio->loop_timeout_us && aio->loop.relax_timeout) {
+            timeout = aio->loop.relax_timeout;
+        }
+        else {
+            v_timeout = PyFloat_FromDouble((double)timeout_us / 1000000.0);
+            timeout = v_timeout;
+        }
+        res = PyObject_CallFunctionObjArgs(aio->loop.call_later, timeout, fn_cb, arg, NULL);
+        Py_XDECREF(v_timeout);
+    }
+    Py_XDECREF(res);
+    return res ? 0 : -1;
 }
 
 // -----------------------------------------------------------------------------------
@@ -444,7 +487,6 @@ int asgi_future_set_result_soon(client_t * client, PyObject * future, bool check
     int hr = 0;
     PyObject * set_result = NULL;
     PyObject * done = NULL;
-    PyObject * ret = NULL;
 
     FIN_IF(!future, -4530914);
 
@@ -456,11 +498,10 @@ int asgi_future_set_result_soon(client_t * client, PyObject * future, bool check
         FIN_if(!done, -4530918, PyErr_Clear());
         FIN_IF(done == Py_True, -4530919);  // already completed
     }
-    ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_result, result, NULL);
-    FIN_IF(!ret, -4530921);
+    int rc = aio_loop_call(&g_srv.aio, set_result, 0, result);  // call_later
+    FIN_IF(rc < 0, -4530921);
     hr = 0;
 fin:
-    Py_XDECREF(ret);
     Py_XDECREF(done);
     Py_XDECREF(set_result);
     return hr;
@@ -491,7 +532,6 @@ int asgi_v_future_set_exception_soon(client_t * client, PyObject * future, const
     PyObject * exc_text = NULL;
     PyObject * exception = NULL;
     PyObject * set_exception = NULL;
-    PyObject * ret = NULL;
 
     FIN_IF(!future, -4530851);
     vsnprintf(text, sizeof(text), fmt, args);
@@ -505,11 +545,10 @@ int asgi_v_future_set_exception_soon(client_t * client, PyObject * future, const
     set_exception = PyObject_GetAttr(future, g_cv.set_exception);
     FIN_if(!set_exception, -4530854, PyErr_Clear());
 
-    ret = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, set_exception, exception, NULL);
-    FIN_IF(!ret, -4530855);
+    int rc = aio_loop_call(&g_srv.aio, set_exception, 0, exception);  // call_later
+    FIN_IF(rc < 0, -4530855);
     hr = 0;
 fin:
-    Py_XDECREF(ret);
     Py_XDECREF(set_exception);
     Py_XDECREF(exception);
     Py_XDECREF(exc_text);
