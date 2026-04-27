@@ -61,7 +61,7 @@ PyObject * uni_loop(PyObject * self, PyObject * not_used)
         rc = aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_SOON, -1, NULL);
     } else {
         int timeout_ms = uv_backend_timeout(g_srv.loop);
-        if (timeout_ms >= 0 || g_srv.aio.loop.relax_timeout == NULL) {
+        if (timeout_ms == 0 || g_srv.aio.loop.relax_timeout == NULL) {
             rc = aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_SOON, -1, NULL);
         } else {
             rc = aio_loop_call(&g_srv.aio, (PyObject *)UL_CALL_LATER, -1, NULL);
