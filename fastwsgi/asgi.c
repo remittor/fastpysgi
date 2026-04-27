@@ -2,6 +2,7 @@
 #include "server.h"
 #include "lifespan.h"
 #include "constants.h"
+#include "pyhacks.h"
 
 
 bool asgi_app_check(PyObject * app)
@@ -84,14 +85,15 @@ int asyncio_init(asyncio_t * aio)
     int hr = 0;
     PyObject * set_event_loop = NULL;
     PyObject * new_event_loop = NULL;
+    PyObject * module = NULL;
     PyObject * res = NULL;
 
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
 
     PyObject * aio_loop = PyObject_GetAttrString(g_srv.pysrv, "loop");
-    Py_XDECREF(aio_loop);
-    if (aio_loop == Py_None) {
+    if (!aio_loop) PyErr_Clear();
+    if (aio_loop && aio_loop == Py_None) {
         aio_loop = NULL;
     }
     if (!aio_loop) {
@@ -106,10 +108,17 @@ int asyncio_init(asyncio_t * aio)
         FIN_IF(!res, -4500021);
     } else {
         aio->loop.self = aio_loop;
-        Py_INCREF(aio->loop.self);  // set owner for aio_loop
         aio->loop.borrowed = 1;
         LOGt("%s: loop.borrowed = %d", __func__, aio->loop.borrowed);
     }
+    module = PyObject_GetAttrString((PyObject *)Py_TYPE(aio->loop.self), "__module__");
+    FIN_IF(!module, -4500024);
+    const char * mod_name = PyUnicode_AsUTF8(module);
+    LOGt("%s: aio.loop type module: \"%s\" ", __func__, mod_name);
+    if (strcmp(mod_name, "asyncio.unix_events") == 0 || strcmp(mod_name, "asyncio.windows_events") == 0) {
+        aio->loop.is_stock = 1;
+    }
+
     aio->loop.run_forever = PyObject_GetAttrString(aio->loop.self, "run_forever");
     FIN_IF(!aio->loop.run_forever, -4500027);
     FIN_IF(!PyCallable_Check(aio->loop.run_forever), -4500028);
@@ -125,6 +134,13 @@ int asyncio_init(asyncio_t * aio)
     aio->loop.call_later = PyObject_GetAttrString(aio->loop.self, "call_later");
     FIN_IF(!aio->loop.call_later, -4500045);
     FIN_IF(!PyCallable_Check(aio->loop.call_later), -4500046);
+
+    aio->loop.call_at = PyObject_GetAttrString(aio->loop.self, "call_at");
+    if (aio->loop.call_at) {
+        FIN_IF(!PyCallable_Check(aio->loop.call_at), -4500048);
+    } else {
+        aio->loop.is_stock = 0;
+    }
 
     aio->loop.create_future = PyObject_GetAttrString(aio->loop.self, "create_future");
     FIN_IF(!aio->loop.create_future, -4500051);
@@ -161,6 +177,7 @@ int asyncio_init(asyncio_t * aio)
 fin:
     Py_XDECREF(set_event_loop);
     Py_XDECREF(new_event_loop);
+    Py_XDECREF(module);
     Py_XDECREF(res);
     if (hr) {
         asyncio_free(aio, false);
@@ -180,6 +197,7 @@ int asyncio_free(asyncio_t * aio, bool free_self)
         Py_CLEAR(aio->loop.add_reader);
         Py_CLEAR(aio->loop.create_task);
         Py_CLEAR(aio->loop.create_future);
+        Py_CLEAR(aio->loop.call_at);
         Py_CLEAR(aio->loop.call_later);
         Py_CLEAR(aio->loop.call_soon);
         Py_CLEAR(aio->loop.run_until_complete);
@@ -277,6 +295,13 @@ int aio_loop_call(asyncio_t * aio, PyObject * func_cb, int timeout_us, PyObject 
     }
     if (method == UL_CALL_SOON) {
         res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, fn_cb, arg, NULL);
+    }
+    else if (aio->loop.is_stock) {
+        uint64_t now = py_time_monotonic_ns();
+        uint64_t call_time_ns = (timeout_us > 0) ? now + timeout_us * 1000 : now;
+        PyObject * call_time = PyFloat_FromDouble((double)call_time_ns / 1000000000.0);
+        res = PyObject_CallFunctionObjArgs(aio->loop.call_at, call_time, fn_cb, arg, NULL);
+        Py_XDECREF(call_time);
     }
     else {
         PyObject * v_timeout = NULL;

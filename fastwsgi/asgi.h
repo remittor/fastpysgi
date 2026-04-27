@@ -22,12 +22,14 @@ typedef struct {
     int        loop_timeout_us; // timeout for call_later into uni_loop (microsec)
     int        req_hdr_lower;   // 0 = not change case for header names, 1 = force lowercase
     struct {
+        int is_stock;           // 1 = used stock asyncio event loop object
         int borrowed;
         PyObject * self;
         PyObject * run_forever;
         PyObject * run_until_complete;
         PyObject * call_soon;
         PyObject * call_later;
+        PyObject * call_at;
         PyObject * create_future;
         PyObject * create_task;
         PyObject * add_reader;
