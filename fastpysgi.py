@@ -43,7 +43,7 @@ class _Server():
         self.nowait = 0
         self.num_workers = 1
         self.worker_list = [ ]
-        self.loop = None                # ASGI: borrowed aio loop (None = new_event_loop)
+        self.loop_factory = None        # ASGI: method compatible with new_event_loop (None = asyncio.new_event_loop)
         self.loop_timeout = 3000        # ASGI: timeout for CPU relax (microsec)
         self.lifespan = 2               # ASGI: 0 = off, 1 = on, 2 = auto
         self.lifespan_fose = 0          # ASGI: 0 = log and continue, 1 = server abort (fail_on_startup_error)

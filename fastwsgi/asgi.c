@@ -83,6 +83,7 @@ static PyMethodDef uni_loop_method = {
 int asyncio_init(asyncio_t * aio)
 {
     int hr = 0;
+    PyObject * loop_fac = NULL;
     PyObject * set_event_loop = NULL;
     PyObject * new_event_loop = NULL;
     PyObject * module = NULL;
@@ -90,31 +91,34 @@ int asyncio_init(asyncio_t * aio)
 
     aio->asyncio = PyImport_ImportModule("asyncio");
     FIN_IF(!aio->asyncio, -4500010);
+    set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
+    FIN_IF(!set_event_loop, -4500017);
 
-    PyObject * aio_loop = PyObject_GetAttrString(g_srv.pysrv, "loop");
-    if (!aio_loop) PyErr_Clear();
-    if (aio_loop && aio_loop == Py_None) {
-        aio_loop = NULL;
+    loop_fac = PyObject_GetAttrString(g_srv.pysrv, "loop_factory");
+    if (!loop_fac) PyErr_Clear();
+    if (loop_fac && loop_fac == Py_None) {
+        loop_fac = NULL;
     }
-    if (!aio_loop) {
+    if (!loop_fac) {
         aio->loop.borrowed = 0;
-        set_event_loop = PyObject_GetAttrString(aio->asyncio, "set_event_loop");
-        FIN_IF(!set_event_loop, -4500017);
         new_event_loop = PyObject_GetAttrString(aio->asyncio, "new_event_loop");
         FIN_IF(!new_event_loop, -4500018);
         aio->loop.self = PyObject_CallObject(new_event_loop, NULL);
         FIN_IF(!aio->loop.self, -4500020);
-        res = PyObject_CallFunctionObjArgs(set_event_loop, aio->loop.self, NULL);
-        FIN_IF(!res, -4500021);
     } else {
-        aio->loop.self = aio_loop;
         aio->loop.borrowed = 1;
         LOGt("%s: loop.borrowed = %d", __func__, aio->loop.borrowed);
+        FIN_IF(!PyCallable_Check(loop_fac), -4500018);
+        aio->loop.self = PyObject_CallObject(loop_fac, NULL);
+        FIN_IF(!aio->loop.self, -4500020);
     }
+    res = PyObject_CallFunctionObjArgs(set_event_loop, aio->loop.self, NULL);
+    FIN_IF(!res, -4500021);
+
     module = PyObject_GetAttrString((PyObject *)Py_TYPE(aio->loop.self), "__module__");
     FIN_IF(!module, -4500024);
     const char * mod_name = PyUnicode_AsUTF8(module);
-    LOGt("%s: aio.loop type module: \"%s\" ", __func__, mod_name);
+    LOGt("%s: aio.loop type from module: \"%s\" ", __func__, mod_name);
     if (strcmp(mod_name, "asyncio.unix_events") == 0 || strcmp(mod_name, "asyncio.windows_events") == 0) {
         aio->loop.is_stock = 1;
     }
@@ -178,6 +182,7 @@ fin:
     Py_XDECREF(set_event_loop);
     Py_XDECREF(new_event_loop);
     Py_XDECREF(module);
+    Py_XDECREF(loop_fac);
     Py_XDECREF(res);
     if (hr) {
         asyncio_free(aio, false);
